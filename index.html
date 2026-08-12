@@ -20,7 +20,10 @@
   ----------------------------------------------------------------------------
   PAGES MODE  — the visual page organiser
       Import many PDFs, reorder by dragging, delete, duplicate, rotate,
-      cut/copy/paste, insert blanks, split, and export.
+      cut/copy/paste, split, and export. Blank pages can be inserted at any
+      point — in any quantity, at a chosen paper size and orientation, or
+      matching whatever page they sit next to — and a document can be started
+      from a blank page with no import at all.
 
   TEXT MODE   — the cover-and-redraw text editor
       Click any line of text on the page and retype it. The original run is
@@ -359,6 +362,14 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   color: var(--text-tertiary);
 }
 
+/* Sits inside the drop zone but is its own click target, so pressing it does
+   not also open the file browser. */
+.drop-zone-actions {
+  margin-top: var(--space-lg);
+  display: flex;
+  justify-content: center;
+}
+
 /* ==========================================================================
    7. TOOLBAR
    ========================================================================== */
@@ -599,11 +610,12 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   animation: spin 0.8s linear infinite;
 }
 
+/* Sized inline from the page's own proportions so a landscape or custom blank
+   is recognisable at a glance rather than a generic square. */
 .blank-page-marker {
-  width: 100%;
-  height: 100%;
   background: #FFFFFF;
   border: 1px dashed var(--border-medium);
+  border-radius: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -611,6 +623,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   color: var(--text-tertiary);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  box-shadow: var(--shadow-xs);
 }
 
 .card-meta {
@@ -1599,6 +1612,15 @@ kbd {
     <div class="drop-zone-hint">
       Multiple PDFs merge into one working document. PNG and JPG images become pages too.
     </div>
+    <div class="drop-zone-actions">
+      <button class="secondary-button" id="dropZoneBlankButton" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <path d="M14 2v6h6"></path>
+        </svg>
+        Or start with a blank page
+      </button>
+    </div>
   </section>
 
   <!-- ---------------------------------------------------------------------
@@ -1689,7 +1711,7 @@ kbd {
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-group">
-      <button class="tool-button" id="blankPageButton" title="Insert a blank page after the selection">
+      <button class="tool-button" id="blankPageButton" title="Insert blank pages (Shift+B)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
           <path d="M14 2v6h6"></path>
@@ -2146,6 +2168,86 @@ kbd {
 </div>
 
 <!-- ==========================================================================
+     BLANK PAGE MODAL
+     ========================================================================== -->
+<div class="modal-backdrop" id="blankPageModal">
+  <div class="modal-card" style="width: min(560px, 96vw);">
+    <div class="modal-header">
+      <span class="modal-title">Insert blank pages</span>
+      <button class="icon-button" id="blankPageCloseButton" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="explainer-note">
+        <strong>These are real pages.</strong> They are written into the exported PDF at the size
+        you choose here, so they print and bind like any other sheet. Switch to Text mode
+        afterwards to lay text onto one.
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label for="blankCountInput">How many pages</label>
+          <input type="number" id="blankCountInput" min="1" max="100" step="1" value="1" />
+        </div>
+        <div class="field field-grow">
+          <label for="blankPositionSelect">Where they go</label>
+          <select id="blankPositionSelect">
+            <option value="after">After the selected pages</option>
+            <option value="before">Before the selected pages</option>
+            <option value="start">At the very start</option>
+            <option value="end">At the very end</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label for="blankSizeSelect">Page size</label>
+          <select id="blankSizeSelect">
+            <option value="match">Match the neighbouring page</option>
+            <option value="a4">A4 — 210 × 297 mm</option>
+            <option value="a3">A3 — 297 × 420 mm</option>
+            <option value="a5">A5 — 148 × 210 mm</option>
+            <option value="letter">US Letter — 8.5 × 11 in</option>
+            <option value="legal">US Legal — 8.5 × 14 in</option>
+            <option value="tabloid">Tabloid — 11 × 17 in</option>
+            <option value="custom">Custom size…</option>
+          </select>
+        </div>
+        <div class="field field-grow">
+          <label for="blankOrientationSelect">Orientation</label>
+          <select id="blankOrientationSelect">
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row" id="blankCustomRow" style="display: none;">
+        <div class="field field-grow">
+          <label for="blankCustomWidthInput">Width (mm)</label>
+          <input type="number" id="blankCustomWidthInput" min="10" max="2000" step="1" value="210" />
+        </div>
+        <div class="field field-grow">
+          <label for="blankCustomHeightInput">Height (mm)</label>
+          <input type="number" id="blankCustomHeightInput" min="10" max="2000" step="1" value="297" />
+        </div>
+      </div>
+
+      <div class="explainer-note" id="blankPageSummary" style="margin-top: 14px;"></div>
+
+      <div class="action-row">
+        <button class="secondary-button" id="blankPageCancelButton">Cancel</button>
+        <button class="primary-button" id="blankPageConfirmButton">Insert pages</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
      FIND AND REPLACE MODAL
      ========================================================================== -->
 <div class="modal-backdrop" id="findReplaceModal">
@@ -2272,6 +2374,7 @@ kbd {
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>Copy the selected pages</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Paste after the selection</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Duplicate the selected pages</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>B</kbd></td><td>Insert blank pages</td></tr>
         <tr><td><kbd>Shift</kbd> + <kbd>L</kbd> / <kbd>R</kbd></td><td>Rotate the selection left or right</td></tr>
         <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Move the selection earlier or later</td></tr>
 
@@ -2352,12 +2455,34 @@ const SOURCE_SWATCH_COLORS = [
   '#F0F4C3', '#B2DFDB', '#F8BBD0', '#D7CCC8', '#CFD8DC'
 ];
 
-/* Blank pages use A4 dimensions expressed in PDF points. */
+/* Blank pages fall back to A4 dimensions expressed in PDF points. */
 const BLANK_PAGE_WIDTH_POINTS = 595.28;
 const BLANK_PAGE_HEIGHT_POINTS = 841.89;
 
+/* A PDF point is 1/72 of an inch, so a millimetre is 72/25.4 points. */
+const POINTS_PER_MILLIMETRE = 72 / 25.4;
+
+/* Paper sizes offered when inserting a blank page, all stated portrait-first
+   in PDF points. Landscape simply swaps the two numbers. */
+const BLANK_PAGE_SIZE_PRESETS = [
+  { key: 'a3', label: 'A3 — 297 × 420 mm', width: 841.89, height: 1190.55 },
+  { key: 'a4', label: 'A4 — 210 × 297 mm', width: 595.28, height: 841.89 },
+  { key: 'a5', label: 'A5 — 148 × 210 mm', width: 419.53, height: 595.28 },
+  { key: 'letter', label: 'US Letter — 8.5 × 11 in', width: 612, height: 792 },
+  { key: 'legal', label: 'US Legal — 8.5 × 14 in', width: 612, height: 1008 },
+  { key: 'tabloid', label: 'Tabloid — 11 × 17 in', width: 792, height: 1224 }
+];
+
+/* Guard rails for the blank page dialog. */
+const MAXIMUM_BLANK_PAGES_PER_INSERT = 100;
+const MINIMUM_CUSTOM_PAGE_MILLIMETRES = 10;
+const MAXIMUM_CUSTOM_PAGE_MILLIMETRES = 2000;
+
 /* Thumbnails are rendered at this pixel width, then scaled by CSS. */
 const THUMBNAIL_RENDER_WIDTH = 260;
+
+/* Must stay in step with the aspect-ratio on .thumbnail-frame. */
+const THUMBNAIL_FRAME_ASPECT = 1 / 1.35;
 
 /* How many history snapshots we retain before dropping the oldest. */
 const MAXIMUM_HISTORY_DEPTH = 60;
@@ -3266,40 +3391,281 @@ function pasteClipboardPages() {
   showToast('Pasted ' + pastedPages.length + ' page' + (pastedPages.length === 1 ? '' : 's') + '.');
 }
 
-function insertBlankPage() {
-  pushHistorySnapshot();
+/* --------------------------------------------------------------------------
+   BLANK PAGES
+
+   A blank page carries no source document — it is just a size, remembered in
+   PDF points, that becomes a real empty page at export time. Because it is an
+   ordinary member of pageList it can be reordered, duplicated, rotated and
+   written on in Text mode exactly like an imported page.
+   -------------------------------------------------------------------------- */
+
+/** The width and height a page presents once its rotation is taken into account. */
+function displayedPageSize(pageEntry) {
+  const rotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+  const axesSwap = rotation === 90 || rotation === 270;
+
+  return {
+    width: axesSwap ? pageEntry.pointHeight : pageEntry.pointWidth,
+    height: axesSwap ? pageEntry.pointWidth : pageEntry.pointHeight
+  };
+}
+
+/** Rounded millimetre dimensions, for tooltips and summary lines. */
+function describePageSizeInMillimetres(pageEntry) {
+  const displayed = displayedPageSize(pageEntry);
+  return Math.round(displayed.width / POINTS_PER_MILLIMETRE) + ' × ' +
+    Math.round(displayed.height / POINTS_PER_MILLIMETRE) + ' mm';
+}
+
+/** Width divided by height, guarded so a malformed page cannot divide by zero. */
+function blankPageDisplayAspect(pageEntry) {
+  const displayed = displayedPageSize(pageEntry);
+  if (!(displayed.height > 0)) { return THUMBNAIL_FRAME_ASPECT; }
+  return displayed.width / displayed.height;
+}
+
+/** Finds the preset record for a key, or null when the key is not a preset. */
+function findBlankPageSizePreset(sizeKey) {
+  return BLANK_PAGE_SIZE_PRESETS.find(function (preset) {
+    return preset.key === sizeKey;
+  }) || null;
+}
+
+/** Turns a position keyword into the index the new pages are spliced at. */
+function resolveBlankInsertPosition(positionKey) {
+  if (positionKey === 'start') { return 0; }
+  if (positionKey === 'end') { return pageList.length; }
 
   const selectedIndexes = getSelectedIndexesSorted();
-  const insertPosition = selectedIndexes.length > 0
-    ? selectedIndexes[selectedIndexes.length - 1] + 1
-    : pageList.length;
-
-  let blankWidth = BLANK_PAGE_WIDTH_POINTS;
-  let blankHeight = BLANK_PAGE_HEIGHT_POINTS;
-
-  if (insertPosition > 0 && pageList[insertPosition - 1]) {
-    blankWidth = pageList[insertPosition - 1].pointWidth;
-    blankHeight = pageList[insertPosition - 1].pointHeight;
+  if (selectedIndexes.length === 0) {
+    /* With nothing selected, "before" means the top of the document and
+       "after" means the bottom — the two ends the user can still point at. */
+    return positionKey === 'before' ? 0 : pageList.length;
   }
 
-  const blankPage = {
+  if (positionKey === 'before') { return selectedIndexes[0]; }
+  return selectedIndexes[selectedIndexes.length - 1] + 1;
+}
+
+/** The page a "match the neighbour" blank should copy its size from. */
+function findBlankSizeReferencePage(insertPosition) {
+  return pageList[insertPosition - 1] || pageList[insertPosition] || null;
+}
+
+/**
+ * Works out the width and height, in PDF points, of the blank pages described
+ * by a dialog choice. Returns the dimensions plus a human-readable label for
+ * the summary line and the toast.
+ */
+function resolveBlankPageSize(choice, insertPosition) {
+  const orientation = choice.orientation === 'landscape' ? 'landscape' : 'portrait';
+
+  if (choice.sizeKey === 'match') {
+    const referencePage = findBlankSizeReferencePage(insertPosition);
+
+    if (referencePage) {
+      /* A rotated neighbour looks like its swapped self on screen, so match
+         what the user can actually see rather than the stored numbers. */
+      const displayed = displayedPageSize(referencePage);
+      return {
+        width: displayed.width,
+        height: displayed.height,
+        label: 'matching the neighbouring page'
+      };
+    }
+
+    return {
+      width: BLANK_PAGE_WIDTH_POINTS,
+      height: BLANK_PAGE_HEIGHT_POINTS,
+      label: 'A4 portrait'
+    };
+  }
+
+  if (choice.sizeKey === 'custom') {
+    const widthMillimetres = clampNumber(
+      choice.customWidthMillimetres,
+      MINIMUM_CUSTOM_PAGE_MILLIMETRES,
+      MAXIMUM_CUSTOM_PAGE_MILLIMETRES
+    );
+    const heightMillimetres = clampNumber(
+      choice.customHeightMillimetres,
+      MINIMUM_CUSTOM_PAGE_MILLIMETRES,
+      MAXIMUM_CUSTOM_PAGE_MILLIMETRES
+    );
+
+    /* The orientation control still has the final say, so a custom size typed
+       the "wrong" way round is turned rather than silently accepted. */
+    const longerEdge = Math.max(widthMillimetres, heightMillimetres);
+    const shorterEdge = Math.min(widthMillimetres, heightMillimetres);
+    const finalWidthMillimetres = orientation === 'landscape' ? longerEdge : shorterEdge;
+    const finalHeightMillimetres = orientation === 'landscape' ? shorterEdge : longerEdge;
+
+    return {
+      width: finalWidthMillimetres * POINTS_PER_MILLIMETRE,
+      height: finalHeightMillimetres * POINTS_PER_MILLIMETRE,
+      label: Math.round(finalWidthMillimetres) + ' × ' +
+        Math.round(finalHeightMillimetres) + ' mm'
+    };
+  }
+
+  const preset = findBlankPageSizePreset(choice.sizeKey) || findBlankPageSizePreset('a4');
+  const sizeName = preset.label.split(' — ')[0];
+
+  if (orientation === 'landscape') {
+    return { width: preset.height, height: preset.width, label: sizeName + ' landscape' };
+  }
+
+  return { width: preset.width, height: preset.height, label: sizeName + ' portrait' };
+}
+
+/** Builds one blank page descriptor at the given size. */
+function createBlankPageDescriptor(pageWidth, pageHeight) {
+  return {
     uniqueId: createUniqueId('page'),
     sourceId: null,
     sourcePageIndex: -1,
     userRotation: 0,
     basePageRotation: 0,
-    pointWidth: blankWidth,
-    pointHeight: blankHeight,
+    pointWidth: pageWidth,
+    pointHeight: pageHeight,
     isBlank: true
   };
+}
+
+/**
+ * Inserts one or more blank pages. `choice` accepts count, position, sizeKey,
+ * orientation and the two custom millimetre fields; anything left out falls
+ * back to a single A4-or-matching page after the selection.
+ */
+function insertBlankPages(choice) {
+  const settings = choice || {};
+  const requestedCount = Math.round(Number(settings.count));
+  const pageCount = clampNumber(
+    Number.isFinite(requestedCount) ? requestedCount : 1,
+    1,
+    MAXIMUM_BLANK_PAGES_PER_INSERT
+  );
+
+  const insertPosition = resolveBlankInsertPosition(settings.position || 'after');
+  const resolvedSize = resolveBlankPageSize({
+    sizeKey: settings.sizeKey || 'match',
+    orientation: settings.orientation,
+    customWidthMillimetres: settings.customWidthMillimetres,
+    customHeightMillimetres: settings.customHeightMillimetres
+  }, insertPosition);
+
+  pushHistorySnapshot();
+
+  const newPages = [];
+  for (let pageNumber = 0; pageNumber < pageCount; pageNumber += 1) {
+    newPages.push(createBlankPageDescriptor(resolvedSize.width, resolvedSize.height));
+  }
 
   const head = pageList.slice(0, insertPosition);
   const tail = pageList.slice(insertPosition);
-  pageList = head.concat([blankPage], tail);
+  pageList = head.concat(newPages, tail);
 
-  setSelection([blankPage.uniqueId]);
+  setSelection(newPages.map(function (pageEntry) { return pageEntry.uniqueId; }));
+  lastClickedPageId = newPages[newPages.length - 1].uniqueId;
+
   renderEverything();
-  showToast('Blank page inserted.');
+  showToast(
+    'Inserted ' + pageCount + ' blank page' + (pageCount === 1 ? '' : 's') +
+    ' (' + resolvedSize.label + ').',
+    'success'
+  );
+}
+
+/* --- The blank page dialog --------------------------------------------- */
+
+/** Reads a numeric field, falling back only when it holds no number at all. */
+function readNumericField(elementId, fallbackValue) {
+  const parsedValue = parseFloat(getElement(elementId).value);
+  return Number.isFinite(parsedValue) ? parsedValue : fallbackValue;
+}
+
+/** Reads every control in the dialog into one plain choice object. */
+function readBlankPageDialog() {
+  return {
+    count: readNumericField('blankCountInput', 1),
+    position: getElement('blankPositionSelect').value,
+    sizeKey: getElement('blankSizeSelect').value,
+    orientation: getElement('blankOrientationSelect').value,
+    customWidthMillimetres: readNumericField('blankCustomWidthInput', 210),
+    customHeightMillimetres: readNumericField('blankCustomHeightInput', 297)
+  };
+}
+
+/** Describes, in words, where the new pages will land. */
+function describeBlankInsertPosition(insertPosition, pageCount) {
+  if (pageList.length === 0) {
+    return 'They will start a new document';
+  }
+  if (insertPosition === 0) {
+    return 'They will go in front of page 1';
+  }
+  if (insertPosition >= pageList.length) {
+    return 'They will go at the end, after page ' + pageList.length;
+  }
+  return 'They will go between pages ' + insertPosition + ' and ' + (insertPosition + 1) +
+    ', pushing the rest down by ' + pageCount;
+}
+
+/** Keeps the dialog's dependent controls and its summary line in step. */
+function updateBlankPageDialogState() {
+  const choice = readBlankPageDialog();
+  const sizeIsCustom = choice.sizeKey === 'custom';
+  const sizeMatchesNeighbour = choice.sizeKey === 'match';
+
+  getElement('blankCustomRow').style.display = sizeIsCustom ? 'flex' : 'none';
+
+  /* Matching a neighbour already fixes the orientation, so the control would
+     only mislead if it stayed live. */
+  const orientationSelect = getElement('blankOrientationSelect');
+  orientationSelect.disabled = sizeMatchesNeighbour;
+  orientationSelect.title = sizeMatchesNeighbour
+    ? 'The neighbouring page decides the orientation'
+    : '';
+
+  const pageCount = clampNumber(Math.round(choice.count), 1, MAXIMUM_BLANK_PAGES_PER_INSERT);
+  const insertPosition = resolveBlankInsertPosition(choice.position);
+  const resolvedSize = resolveBlankPageSize(choice, insertPosition);
+
+  const millimetreText =
+    Math.round(resolvedSize.width / POINTS_PER_MILLIMETRE) + ' × ' +
+    Math.round(resolvedSize.height / POINTS_PER_MILLIMETRE) + ' mm';
+
+  /* A custom size labels itself with the same millimetres, so only append the
+     label when it says something the measurement does not. */
+  const sizeNote = resolvedSize.label === millimetreText ? '' : ' (' + resolvedSize.label + ')';
+
+  getElement('blankPageSummary').innerHTML =
+    '<strong>' + pageCount + ' blank page' + (pageCount === 1 ? '' : 's') + '</strong> at ' +
+    millimetreText + sizeNote + '. ' +
+    describeBlankInsertPosition(insertPosition, pageCount) + '.';
+}
+
+function openBlankPageDialog() {
+  /* Nothing selected and nothing to match means the neighbour option would be
+     a silent A4 — start people on an explicit size instead. */
+  if (pageList.length === 0) {
+    getElement('blankSizeSelect').value = 'a4';
+  }
+
+  updateBlankPageDialogState();
+  getElement('blankPageModal').classList.add('is-open');
+  setTimeout(function () { getElement('blankCountInput').focus(); }, 60);
+}
+
+function closeBlankPageDialog() {
+  getElement('blankPageModal').classList.remove('is-open');
+}
+
+function confirmBlankPageDialog() {
+  const choice = readBlankPageDialog();
+  closeBlankPageDialog();
+  insertBlankPages(choice);
 }
 
 function moveSelection(directionOffset) {
@@ -3439,6 +3805,18 @@ function renderPageGrid() {
       const blankMarker = document.createElement('div');
       blankMarker.className = 'blank-page-marker';
       blankMarker.textContent = 'Blank';
+
+      /* The frame is a fixed 1:1.35 portrait box, so a page narrower than that
+         is limited by its height and anything wider by its width. */
+      const pageAspect = blankPageDisplayAspect(pageEntry);
+      if (pageAspect < THUMBNAIL_FRAME_ASPECT) {
+        blankMarker.style.height = '100%';
+        blankMarker.style.width = (pageAspect / THUMBNAIL_FRAME_ASPECT * 100) + '%';
+      } else {
+        blankMarker.style.width = '100%';
+        blankMarker.style.height = (THUMBNAIL_FRAME_ASPECT / pageAspect * 100) + '%';
+      }
+
       thumbnailFrame.appendChild(blankMarker);
     } else {
       const cacheKey = buildThumbnailCacheKey(pageEntry);
@@ -3467,15 +3845,20 @@ function renderPageGrid() {
     const actionDefinitions = [
       { label: 'Rotate left', icon: ICON_ROTATE_LEFT, action: 'rotate-left', style: '' },
       { label: 'Rotate right', icon: ICON_ROTATE_RIGHT, action: 'rotate-right', style: '' },
-      { label: 'Edit the text on this page', icon: ICON_EDIT_TEXT, action: 'edit-text', style: ' is-edit' },
+      {
+        label: pageEntry.isBlank
+          ? 'Add text to this blank page'
+          : 'Edit the text on this page',
+        icon: ICON_EDIT_TEXT,
+        action: 'edit-text',
+        style: ' is-edit'
+      },
       { label: 'Duplicate', icon: ICON_DUPLICATE, action: 'duplicate', style: '' },
       { label: 'Preview', icon: ICON_PREVIEW, action: 'preview', style: '' },
       { label: 'Delete', icon: ICON_TRASH, action: 'delete', style: ' is-danger' }
     ];
 
     actionDefinitions.forEach(function (definition) {
-      if (definition.action === 'edit-text' && pageEntry.isBlank) { return; }
-
       const actionButton = document.createElement('button');
       actionButton.className = 'card-action-button' + definition.style;
       actionButton.title = definition.label;
@@ -3522,7 +3905,7 @@ function renderPageGrid() {
     } else {
       sourceChip.style.background = 'var(--bg-tertiary)';
       sourceChip.textContent = '·';
-      sourceChip.title = 'Blank page';
+      sourceChip.title = 'Blank page — ' + describePageSizeInMillimetres(pageEntry);
     }
 
     cardMeta.appendChild(sourceChip);
@@ -3791,11 +4174,12 @@ async function renderPreviewCanvas() {
   const sourceRecord = pageEntry.sourceId ? sourceLibrary.get(pageEntry.sourceId) : null;
   getElement('previewTitle').textContent = sourceRecord
     ? sourceRecord.displayName + ' — source page ' + (pageEntry.sourcePageIndex + 1)
-    : 'Blank page';
+    : 'Blank page — ' + describePageSizeInMillimetres(pageEntry);
 
   if (pageEntry.isBlank || !sourceRecord) {
-    canvasElement.width = Math.floor(pageEntry.pointWidth);
-    canvasElement.height = Math.floor(pageEntry.pointHeight);
+    const displayed = displayedPageSize(pageEntry);
+    canvasElement.width = Math.max(1, Math.floor(displayed.width));
+    canvasElement.height = Math.max(1, Math.floor(displayed.height));
     drawingContext.fillStyle = '#FFFFFF';
     drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
     return;
@@ -4216,6 +4600,52 @@ async function loadTextContentForPage(pageEntry) {
   return cachedEntry;
 }
 
+/**
+ * A blank page has no pdf.js page object behind it, so there is no viewport to
+ * borrow either. This builds the small part of one the editor actually uses:
+ * the size, the scale, and the two coordinate conversions. The maths mirrors
+ * pdf.js's own PageViewport for a page whose box starts at the origin.
+ */
+function createBlankPageViewport(pageEntry, renderScale) {
+  const rotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+  const pageWidth = pageEntry.pointWidth;
+  const pageHeight = pageEntry.pointHeight;
+  const axesSwap = rotation === 90 || rotation === 270;
+
+  return {
+    scale: renderScale,
+    rotation: rotation,
+    width: (axesSwap ? pageHeight : pageWidth) * renderScale,
+    height: (axesSwap ? pageWidth : pageHeight) * renderScale,
+
+    convertToViewportPoint: function (userX, userY) {
+      if (rotation === 90) {
+        return [userY * renderScale, userX * renderScale];
+      }
+      if (rotation === 180) {
+        return [(pageWidth - userX) * renderScale, userY * renderScale];
+      }
+      if (rotation === 270) {
+        return [(pageHeight - userY) * renderScale, (pageWidth - userX) * renderScale];
+      }
+      return [userX * renderScale, (pageHeight - userY) * renderScale];
+    },
+
+    convertToPdfPoint: function (deviceX, deviceY) {
+      if (rotation === 90) {
+        return [deviceY / renderScale, deviceX / renderScale];
+      }
+      if (rotation === 180) {
+        return [pageWidth - deviceX / renderScale, deviceY / renderScale];
+      }
+      if (rotation === 270) {
+        return [pageWidth - deviceY / renderScale, pageHeight - deviceX / renderScale];
+      }
+      return [deviceX / renderScale, pageHeight - deviceY / renderScale];
+    }
+  };
+}
+
 /** Opens a page in the text editor: renders it, then builds the overlay. */
 async function openEditorPage(pageIndex) {
   if (pageList.length === 0) { return; }
@@ -4237,21 +4667,25 @@ async function openEditorPage(pageIndex) {
 
   const zoomPercentage = parseInt(getElement('editorZoomSlider').value, 10) || 120;
 
-  /* --- Blank pages have nothing to render or edit --- */
+  /* --- A blank page holds no runs to rewrite, but it is still a canvas the
+         Add text and Whiteout tools can draw onto, so it gets a viewport. --- */
   if (pageEntry.isBlank || !pageEntry.sourceId) {
     editorPdfPage = null;
     editorTextRuns = [];
-    editorViewport = null;
+    editorViewport = createBlankPageViewport(pageEntry, zoomPercentage / 100);
 
-    canvasElement.width = Math.floor(pageEntry.pointWidth * zoomPercentage / 100);
-    canvasElement.height = Math.floor(pageEntry.pointHeight * zoomPercentage / 100);
+    canvasElement.width = Math.floor(editorViewport.width);
+    canvasElement.height = Math.floor(editorViewport.height);
     canvasElement.style.width = canvasElement.width + 'px';
     canvasElement.style.height = canvasElement.height + 'px';
     drawingContext.fillStyle = '#FFFFFF';
     drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
     getElement('canvasHint').textContent =
-      'This is a blank page — there is no text on it to edit.';
+      'This page is blank, so there is nothing to rewrite. Use the Add text tool to place ' +
+      'a text box anywhere on it.';
+
+    buildTextOverlay();
     renderInspector();
     renderPageEditList();
     return;
@@ -5450,7 +5884,10 @@ async function buildPdfBytes(pagesToBuild, options) {
   for (const run of runs) {
     if (run.key === '__blank__') {
       run.entries.forEach(function (pageEntry) {
-        outputDocument.addPage([pageEntry.pointWidth, pageEntry.pointHeight]);
+        const blankOutputPage = outputDocument.addPage([pageEntry.pointWidth, pageEntry.pointHeight]);
+        if (pageEntry.userRotation !== 0) {
+          blankOutputPage.setRotation(PDFLibDegrees(normaliseRotation(pageEntry.userRotation)));
+        }
         pagesCompleted += 1;
       });
       updateProgressOverlay(pagesCompleted, pagesToBuild.length);
@@ -5846,6 +6283,8 @@ function handleGlobalKeyDown(keyEvent) {
     return;
   }
 
+  if (keyEvent.shiftKey && lowerKey === 'b') { keyEvent.preventDefault(); openBlankPageDialog(); return; }
+
   if (keyEvent.shiftKey && lowerKey === 'l') { keyEvent.preventDefault(); rotateSelectedPages(-90); return; }
   if (keyEvent.shiftKey && lowerKey === 'r') { keyEvent.preventDefault(); rotateSelectedPages(90); return; }
 
@@ -5869,7 +6308,18 @@ function wireFileImportControls() {
   const dropZone = getElement('dropZone');
   const fileInput = getElement('fileInput');
 
-  dropZone.addEventListener('click', function () { fileInput.click(); });
+  dropZone.addEventListener('click', function (clickEvent) {
+    /* The blank page button lives inside the drop zone, so its clicks must not
+       also open the file browser. */
+    if (clickEvent.target.closest('#dropZoneBlankButton')) { return; }
+    fileInput.click();
+  });
+
+  getElement('dropZoneBlankButton').addEventListener('click', function (clickEvent) {
+    clickEvent.stopPropagation();
+    openBlankPageDialog();
+  });
+
   getElement('addFilesButton').addEventListener('click', function () { fileInput.click(); });
 
   fileInput.addEventListener('change', function () {
@@ -5951,7 +6401,7 @@ function wirePagesToolbar() {
   getElement('copyButton').addEventListener('click', copySelectedPages);
   getElement('pasteButton').addEventListener('click', pasteClipboardPages);
   getElement('duplicateButton').addEventListener('click', duplicateSelectedPages);
-  getElement('blankPageButton').addEventListener('click', insertBlankPage);
+  getElement('blankPageButton').addEventListener('click', openBlankPageDialog);
   getElement('moveLeftButton').addEventListener('click', function () { moveSelection(-1); });
   getElement('moveRightButton').addEventListener('click', function () { moveSelection(1); });
   getElement('reverseButton').addEventListener('click', reverseDocumentOrder);
@@ -6128,6 +6578,31 @@ function wireModals() {
     if (clickEvent.target === getElement('explainerModal')) {
       getElement('explainerModal').classList.remove('is-open');
     }
+  });
+
+  /* --- Blank page dialog --- */
+  getElement('blankPageCloseButton').addEventListener('click', closeBlankPageDialog);
+  getElement('blankPageCancelButton').addEventListener('click', closeBlankPageDialog);
+  getElement('blankPageConfirmButton').addEventListener('click', confirmBlankPageDialog);
+
+  getElement('blankPageModal').addEventListener('click', function (clickEvent) {
+    if (clickEvent.target === getElement('blankPageModal')) { closeBlankPageDialog(); }
+  });
+
+  /* Every control feeds the same summary line, so they all share one handler. */
+  ['blankCountInput', 'blankPositionSelect', 'blankSizeSelect', 'blankOrientationSelect',
+    'blankCustomWidthInput', 'blankCustomHeightInput'].forEach(function (elementId) {
+    getElement(elementId).addEventListener('input', updateBlankPageDialogState);
+    getElement(elementId).addEventListener('change', updateBlankPageDialogState);
+  });
+
+  /* Enter in any of the fields inserts, which keeps the common case fast.
+     Buttons are left alone so Enter on Cancel still cancels. */
+  getElement('blankPageModal').addEventListener('keydown', function (keyEvent) {
+    if (keyEvent.key !== 'Enter') { return; }
+    if (keyEvent.target.closest('button')) { return; }
+    keyEvent.preventDefault();
+    confirmBlankPageDialog();
   });
 }
 
