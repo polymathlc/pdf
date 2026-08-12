@@ -3,30 +3,59 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Polymath PDF Studio — Visual PDF Page Editor</title>
+<title>Polymath PDF Studio — Page &amp; Text Editor</title>
 
 <!--
   ============================================================================
-  POLYMATH PDF STUDIO
+  POLYMATH PDF STUDIO  v2.0.0
   ----------------------------------------------------------------------------
-  A completely client-side PDF page editor. Nothing is ever uploaded to a
-  server — every byte of every file stays inside this browser tab.
+  A completely client-side PDF editor. Nothing is ever uploaded to a server —
+  every byte of every file stays inside this browser tab.
 
-  Libraries used (loaded from CDN, both MIT licensed):
-    • pdf.js   — renders page thumbnails and the large preview
-    • pdf-lib  — rebuilds/exports the edited PDF document
+  Libraries (CDN, both MIT licensed):
+    * pdf.js   — renders thumbnails, the large preview, and the text layer
+    * pdf-lib  — rebuilds and exports the edited PDF document
 
-  Feature summary:
-    • Import any number of PDFs (they merge into one working document)
-    • Import PNG / JPG images — each becomes a page
-    • Thumbnail grid with page numbers and colour-coded source chips
-    • Click / Ctrl-click / Shift-click selection, plus range selection ("1-4, 9")
-    • Delete, duplicate, rotate, cut, copy, paste, extract, insert blank page
-    • Drag-and-drop reordering (drags the whole selection at once)
-    • Full undo / redo history
-    • Large page preview with keyboard navigation
-    • Export with optional stamped page numbers
-    • Split the document into fixed-size chunks
+  TWO WORKING MODES
+  ----------------------------------------------------------------------------
+  PAGES MODE  — the visual page organiser
+      Import many PDFs, reorder by dragging, delete, duplicate, rotate,
+      cut/copy/paste, insert blanks, split, and export.
+
+  TEXT MODE   — the cover-and-redraw text editor
+      Click any line of text on the page and retype it. The original run is
+      covered with a rectangle painted in the sampled background colour, then
+      the replacement string is drawn at the same baseline using a matched
+      standard font. Also supports free-floating new text boxes, whiteout
+      rectangles, and a document-wide find-and-replace.
+
+  HOW THE TEXT EDITING ACTUALLY WORKS (and its honest limits)
+  ----------------------------------------------------------------------------
+  A PDF does not store "text" the way a word processor does. It stores glyph
+  codes positioned by explicit matrices, drawn with fonts that are usually
+  SUBSETTED — only the glyphs the document already uses are embedded. Genuine
+  in-place editing would mean parsing the content stream, mapping glyph codes
+  back to characters through the font's encoding and ToUnicode tables, editing
+  them, and re-encoding against a font that may not contain the new glyphs.
+  No browser library does this.
+
+  So this editor covers and redraws instead:
+      1. pdf.js getTextContent() gives every text run with its baseline
+         matrix, advance width, and font reference.
+      2. The colour immediately around that run is sampled off the rendered
+         canvas, so the cover rectangle matches the paper rather than being
+         forced white.
+      3. pdf-lib draws the rectangle, then draws the replacement string with
+         a standard font chosen to match the original's weight, slant and
+         serif-ness, at the same baseline and size.
+
+  This is excellent for: names, dates, numbers, titles, headers, typos,
+  single-line labels, and year-to-year updates of a worksheet.
+
+  It struggles with: text sitting on photographs or gradients, justified
+  multi-line paragraphs that would need reflowing, exotic embedded fonts whose
+  metrics differ noticeably from the standard 14, and scanned documents, which
+  contain no text objects at all — only pixels.
   ============================================================================
 -->
 
@@ -67,6 +96,12 @@
   --accent-base: #FFB74D;
   --accent-dark: #FFA726;
   --accent-bg: #FFF3E0;
+
+  /* Secondary accent used only by Text mode, so the two modes read apart */
+  --edit-light: #D1C4E9;
+  --edit-base: #9575CD;
+  --edit-dark: #7E57C2;
+  --edit-bg: #EDE7F6;
 
   /* Semantic */
   --danger-light: #FFCDD2;
@@ -203,7 +238,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 .title-block {
   text-align: center;
   padding: var(--space-xl) var(--space-lg) var(--space-lg);
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
 }
 
@@ -234,10 +269,48 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 /* ==========================================================================
-   5. DROP ZONE
+   5. MODE SWITCH
+   ========================================================================== */
+.mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  margin: var(--space-lg) auto 0;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+}
+
+.mode-switch-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 20px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: background var(--transition-base), color var(--transition-base),
+              box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.mode-switch-button svg { width: 16px; height: 16px; }
+
+.mode-switch-button:hover { color: var(--text-primary); transform: translateY(-1px); }
+
+.mode-switch-button.is-active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-button);
+}
+
+.mode-switch-button.is-active[data-mode="text"] { color: var(--edit-dark); }
+
+/* ==========================================================================
+   6. DROP ZONE
    ========================================================================== */
 .workspace {
-  max-width: 1320px;
+  max-width: 1480px;
   margin: 0 auto;
   padding: 0 var(--space-lg);
 }
@@ -251,6 +324,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   transition: border-color var(--transition-base), background var(--transition-base),
               transform var(--transition-base), box-shadow var(--transition-base);
   cursor: pointer;
+  margin-top: var(--space-lg);
 }
 
 .drop-zone:hover {
@@ -286,7 +360,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 /* ==========================================================================
-   6. TOOLBAR
+   7. TOOLBAR
    ========================================================================== */
 .toolbar {
   position: sticky;
@@ -346,7 +420,6 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 .tool-button:active:not(:disabled) { transform: translateY(0.5px); }
-
 .tool-button:disabled { opacity: 0.34; cursor: not-allowed; }
 
 .tool-button.is-primary {
@@ -366,6 +439,19 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   color: #A33A3A;
 }
 
+/* A toggled-on tool in Text mode (the active drawing tool). */
+.tool-button.is-tool-active {
+  background: var(--edit-base);
+  color: #FFFFFF;
+  border-color: var(--edit-dark);
+  box-shadow: var(--shadow-button);
+}
+
+.tool-button.is-tool-active:hover:not(:disabled) {
+  background: var(--edit-dark);
+  color: #FFFFFF;
+}
+
 .zoom-control {
   display: flex;
   align-items: center;
@@ -382,7 +468,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 /* ==========================================================================
-   7. STATUS / SELECTION BAR
+   8. STATUS / SELECTION BAR
    ========================================================================== */
 .status-bar {
   display: flex;
@@ -400,6 +486,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 
 .status-metric { display: inline-flex; align-items: center; gap: 6px; }
 .status-metric strong { color: var(--text-primary); font-weight: 700; }
+.status-metric.is-edit strong { color: var(--edit-dark); }
 
 .status-spacer { flex: 1 1 auto; }
 
@@ -422,6 +509,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 .mini-button:hover { background: var(--accent-light); color: var(--text-primary); transform: translateY(-1px); }
+.mini-button.is-danger:hover { background: var(--danger-light); color: #A33A3A; }
 
 .range-input {
   width: 132px;
@@ -440,7 +528,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 /* ==========================================================================
-   8. PAGE GRID
+   9. PAGE GRID
    ========================================================================== */
 .page-grid {
   display: grid;
@@ -476,7 +564,6 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 }
 
 .page-card.is-dragging { opacity: 0.35; transform: scale(0.96); }
-
 .page-card.drop-before { box-shadow: -3px 0 0 0 var(--accent-dark), var(--shadow-md); }
 .page-card.drop-after  { box-shadow:  3px 0 0 0 var(--accent-dark), var(--shadow-md); }
 
@@ -535,15 +622,20 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   font-size: var(--font-size-xs);
 }
 
-.page-number {
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.02em;
-}
+.page-number { font-weight: 700; color: var(--text-primary); letter-spacing: 0.02em; }
+.rotation-tag { color: var(--text-tertiary); font-size: 0.7rem; }
 
-.rotation-tag {
-  color: var(--text-tertiary);
-  font-size: 0.7rem;
+/* Small purple dot showing a page carries unsaved text edits. */
+.edit-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--edit-bg);
+  color: var(--edit-dark);
+  font-size: 0.62rem;
+  font-weight: 700;
 }
 
 .source-chip {
@@ -591,6 +683,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 .card-action-button svg { width: 13px; height: 13px; }
 .card-action-button:hover { background: var(--accent-base); color: #4A3413; transform: scale(1.08); }
 .card-action-button.is-danger:hover { background: var(--danger-base); color: #FFFFFF; }
+.card-action-button.is-edit:hover { background: var(--edit-base); color: #FFFFFF; }
 
 .selection-badge {
   position: absolute;
@@ -613,7 +706,305 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 .page-card.is-selected .selection-badge { display: inline-flex; }
 
 /* ==========================================================================
-   9. EXPORT PANEL
+   10. TEXT MODE LAYOUT
+   ========================================================================== */
+.text-mode-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-lg);
+  align-items: start;
+  padding-bottom: var(--space-xl);
+}
+
+.canvas-column {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: 420px;
+}
+
+/* The stage holds the rendered canvas and the absolutely positioned text
+   overlay in the same coordinate space. */
+.editor-stage {
+  position: relative;
+  line-height: 0;
+  box-shadow: var(--shadow-lg);
+  background: #FFFFFF;
+  border-radius: 2px;
+  transition: box-shadow var(--transition-base);
+}
+
+.editor-stage canvas { display: block; border-radius: 2px; }
+
+.text-overlay {
+  position: absolute;
+  inset: 0;
+  line-height: 1;
+  overflow: hidden;
+}
+
+/* One box per text run reported by pdf.js. */
+.text-run {
+  position: absolute;
+  transform-origin: 0 0;
+  white-space: pre;
+  cursor: text;
+  color: transparent;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.text-overlay.show-runs .text-run { border-color: rgba(149,117,205,0.28); }
+
+.text-run:hover {
+  background: rgba(149,117,205,0.16);
+  border-color: var(--edit-base);
+}
+
+.text-run.is-picked {
+  background: rgba(149,117,205,0.24);
+  border-color: var(--edit-dark);
+}
+
+/* A run that already carries a replacement edit. */
+.text-run.is-edited {
+  background: rgba(129,199,132,0.20);
+  border-color: var(--success-base);
+}
+
+/* Boxes for standalone inserted text and whiteout rectangles. */
+.overlay-object {
+  position: absolute;
+  border-radius: 2px;
+  cursor: move;
+  border: 1px dashed var(--edit-base);
+  background: rgba(149,117,205,0.10);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.overlay-object:hover { box-shadow: 0 0 0 2px var(--edit-light); }
+.overlay-object.is-picked { border-style: solid; border-color: var(--edit-dark); box-shadow: 0 0 0 2px var(--edit-light); }
+.overlay-object.is-whiteout { border-color: var(--text-tertiary); background: rgba(138,138,138,0.14); }
+
+.overlay-object-label {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--edit-dark);
+  background: var(--bg-primary);
+  padding: 0 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* Live marquee drawn while dragging out a whiteout rectangle. */
+.marquee-box {
+  position: absolute;
+  border: 1.5px dashed var(--edit-dark);
+  background: rgba(149,117,205,0.14);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.canvas-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  line-height: var(--line-height-normal);
+  text-align: center;
+  max-width: 560px;
+}
+
+.page-stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.page-stepper input {
+  width: 62px;
+  padding: 5px 8px;
+  text-align: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+}
+
+/* ==========================================================================
+   11. INSPECTOR (right-hand column of Text mode)
+   ========================================================================== */
+.inspector {
+  position: sticky;
+  top: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.inspector-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-md);
+}
+
+.inspector-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.original-text-preview {
+  padding: var(--space-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  max-height: 84px;
+  overflow: auto;
+  word-break: break-word;
+  margin-bottom: var(--space-sm);
+}
+
+.replacement-input {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  background: var(--bg-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.replacement-input:focus {
+  outline: none;
+  border-color: var(--edit-base);
+  box-shadow: 0 0 0 3px var(--edit-bg);
+}
+
+.property-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.property-field { display: flex; flex-direction: column; gap: 4px; }
+
+.property-field label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.property-field select,
+.property-field input[type="number"],
+.property-field input[type="text"] {
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  background: var(--bg-primary);
+}
+
+.property-field input[type="color"] {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  cursor: pointer;
+}
+
+.property-field select:focus,
+.property-field input:focus {
+  outline: none;
+  border-color: var(--edit-base);
+  box-shadow: 0 0 0 3px var(--edit-bg);
+}
+
+.inspector-empty {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  line-height: var(--line-height-normal);
+}
+
+.edit-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; }
+
+.edit-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.edit-list-row:hover { background: var(--edit-bg); border-color: var(--edit-light); }
+
+.edit-kind-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--edit-base);
+}
+
+.edit-kind-dot.is-insert { background: var(--accent-dark); }
+.edit-kind-dot.is-whiteout { background: var(--text-tertiary); }
+
+.edit-row-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.edit-row-remove {
+  color: var(--text-tertiary);
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.edit-row-remove:hover { color: #A33A3A; background: var(--danger-bg); }
+
+.button-stack { display: flex; flex-direction: column; gap: var(--space-sm); }
+.button-row { display: flex; gap: var(--space-sm); }
+.button-row > * { flex: 1 1 0; }
+
+/* ==========================================================================
+   12. PANELS, EXPORT, SOURCES
    ========================================================================== */
 .panel {
   background: var(--bg-primary);
@@ -712,6 +1103,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 .primary-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-sm);
   padding: 11px 22px;
   border-radius: var(--radius-md);
@@ -739,9 +1131,13 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 
 .primary-button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.primary-button.is-edit { background: var(--edit-base); color: #FFFFFF; }
+.primary-button.is-edit:hover:not(:disabled) { background: var(--edit-dark); }
+
 .secondary-button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-sm);
   padding: 11px 20px;
   border-radius: var(--radius-md);
@@ -766,9 +1162,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 
 .secondary-button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ==========================================================================
-   10. SOURCE FILE LIST
-   ========================================================================== */
+.compact-button { padding: 8px 14px; font-size: var(--font-size-xs); }
+
 .source-list { display: flex; flex-direction: column; gap: var(--space-sm); }
 
 .source-row {
@@ -806,7 +1201,7 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 .source-detail { color: var(--text-tertiary); font-size: var(--font-size-xs); white-space: nowrap; }
 
 /* ==========================================================================
-   11. MODALS
+   13. MODALS
    ========================================================================== */
 .modal-backdrop {
   position: fixed;
@@ -879,8 +1274,17 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 
 .shortcut-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
 .shortcut-table td { padding: 7px 0; border-bottom: 1px solid var(--border-subtle); }
-.shortcut-table td:first-child { width: 172px; }
+.shortcut-table td:first-child { width: 178px; }
 .shortcut-table tr:last-child td { border-bottom: none; }
+
+.shortcut-section-heading {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding-top: var(--space-md) !important;
+}
 
 kbd {
   display: inline-block;
@@ -895,8 +1299,57 @@ kbd {
   color: var(--text-primary);
 }
 
+.replace-results {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.replace-hit-row {
+  display: flex;
+  gap: var(--space-sm);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--font-size-xs);
+}
+
+.replace-hit-row:last-child { border-bottom: none; }
+
+.replace-hit-page {
+  font-weight: 700;
+  color: var(--edit-dark);
+  flex-shrink: 0;
+  width: 62px;
+}
+
+.replace-hit-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explainer-note {
+  padding: var(--space-md);
+  background: var(--edit-bg);
+  border: 1px solid var(--edit-light);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  color: #4A3C63;
+  line-height: var(--line-height-normal);
+  margin-bottom: var(--space-md);
+}
+
+.explainer-note strong { color: var(--edit-dark); }
+
 /* ==========================================================================
-   12. TOASTS + PROGRESS
+   14. TOASTS + PROGRESS + VERSION
    ========================================================================== */
 .toast-stack {
   position: fixed;
@@ -917,7 +1370,7 @@ kbd {
   font-size: var(--font-size-sm);
   box-shadow: var(--shadow-lg);
   animation: toastIn 0.28s cubic-bezier(0.34,1.56,0.64,1) both;
-  max-width: 330px;
+  max-width: 340px;
 }
 
 .toast.is-error { background: #B3453F; }
@@ -938,7 +1391,6 @@ kbd {
 }
 
 .progress-overlay.is-open { display: flex; }
-
 .progress-label { font-size: var(--font-size-sm); font-weight: 700; color: var(--text-secondary); }
 
 .progress-track {
@@ -957,9 +1409,6 @@ kbd {
   transition: width var(--transition-base);
 }
 
-/* ==========================================================================
-   13. VERSION BADGE
-   ========================================================================== */
 .version-badge {
   position: fixed;
   bottom: 10px;
@@ -974,7 +1423,7 @@ kbd {
 }
 
 /* ==========================================================================
-   14. ANIMATIONS
+   15. ANIMATIONS
    ========================================================================== */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1002,8 +1451,13 @@ kbd {
 .page-fade-in { animation: fadeIn var(--transition-slow) ease both; }
 
 /* ==========================================================================
-   15. RESPONSIVE
+   16. RESPONSIVE
    ========================================================================== */
+@media (max-width: 1100px) {
+  .text-mode-layout { grid-template-columns: minmax(0, 1fr); }
+  .inspector { position: static; }
+}
+
 @media (max-width: 780px) {
   :root { --thumbnail-width: 132px; }
   .header-tools { right: var(--space-md); }
@@ -1014,15 +1468,18 @@ kbd {
   .toolbar-divider { display: none; }
   .tool-button span { display: none; }
   .tool-button { padding: 8px 10px; }
+  .canvas-column { padding: var(--space-sm); }
+  .mode-switch-button { padding: 8px 14px; }
 }
 
 @media (max-width: 380px) {
   :root { --thumbnail-width: 112px; }
   .status-bar { font-size: var(--font-size-xs); }
+  .property-grid { grid-template-columns: 1fr; }
 }
 
 /* ==========================================================================
-   16. PRINT (A4)
+   17. PRINT (A4)
    ========================================================================== */
 @page { size: A4; margin: 15mm 20mm; }
 
@@ -1030,7 +1487,8 @@ kbd {
   body { background: #FFFFFF; color: #000000; }
   .header-tools, .toolbar, .status-bar, .drop-zone, .panel, .toast-stack,
   .progress-overlay, .modal-backdrop, .version-badge, .card-actions,
-  .selection-badge, .privacy-note { display: none !important; }
+  .selection-badge, .privacy-note, .mode-switch, .inspector,
+  .canvas-hint, .page-stepper { display: none !important; }
   .page-card {
     box-shadow: none !important;
     border: 1px solid #CCCCCC;
@@ -1040,6 +1498,10 @@ kbd {
   .polymath-header { border-bottom: 1px solid #CCCCCC; }
   .polymath-logo { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .page-grid { grid-template-columns: repeat(3, 1fr); }
+  .text-mode-layout { grid-template-columns: 1fr; }
+  .canvas-column { background: #FFFFFF; border: none; padding: 0; }
+  .editor-stage { box-shadow: none; }
+  .text-overlay { display: none; }
 }
 </style>
 </head>
@@ -1056,6 +1518,13 @@ kbd {
     class="polymath-logo" />
 
   <div class="header-tools">
+    <button class="icon-button" id="explainerButton" title="How text editing works" aria-label="How text editing works">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M12 17h.01"></path>
+        <path d="M9.5 9.2a2.6 2.6 0 1 1 3.4 2.5c-.6.2-.9.8-.9 1.4v.4"></path>
+      </svg>
+    </button>
     <button class="icon-button" id="shortcutsButton" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="6" width="20" height="12" rx="2"></rect>
@@ -1073,12 +1542,12 @@ kbd {
 </header>
 
 <!-- ==========================================================================
-     TITLE
+     TITLE + MODE SWITCH
      ========================================================================== -->
 <div class="title-block page-fade-in">
   <h1 class="app-title">PDF Studio</h1>
   <p class="app-subtitle">
-    Merge, reorder, rotate, duplicate and delete PDF pages — then export a clean new file.
+    Reorganise pages, then rewrite the words on them — all without leaving the browser.
   </p>
   <div class="privacy-note">
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -1087,6 +1556,28 @@ kbd {
     </svg>
     Everything runs inside your browser. No file ever leaves this device.
   </div>
+
+  <div style="display: flex; justify-content: center;">
+    <div class="mode-switch" id="modeSwitch" style="display: none;">
+      <button class="mode-switch-button is-active" data-mode="pages">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+        </svg>
+        Pages
+      </button>
+      <button class="mode-switch-button" data-mode="text">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7V5h16v2"></path>
+          <path d="M12 5v14"></path>
+          <path d="M9 19h6"></path>
+        </svg>
+        Text
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- ==========================================================================
@@ -1094,7 +1585,9 @@ kbd {
      ========================================================================== -->
 <main class="workspace">
 
-  <!-- Drop zone (hidden once pages exist) -->
+  <!-- ---------------------------------------------------------------------
+       DROP ZONE (visible only when the document is empty)
+       --------------------------------------------------------------------- -->
   <section class="drop-zone" id="dropZone">
     <svg class="drop-zone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -1108,8 +1601,10 @@ kbd {
     </div>
   </section>
 
-  <!-- Toolbar -->
-  <section class="toolbar" id="toolbar" style="display: none;">
+  <!-- ---------------------------------------------------------------------
+       PAGES MODE TOOLBAR
+       --------------------------------------------------------------------- -->
+  <section class="toolbar" id="pagesToolbar" style="display: none;">
     <div class="toolbar-group">
       <button class="tool-button is-primary" id="addFilesButton" title="Add PDFs or images">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1141,14 +1636,14 @@ kbd {
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-group">
-      <button class="tool-button" id="rotateLeftButton" title="Rotate 90° left (Shift+L)" disabled>
+      <button class="tool-button" id="rotateLeftButton" title="Rotate 90 degrees left (Shift+L)" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 7v6h6"></path>
           <path d="M3 13a9 9 0 1 0 3-7.7L3 8"></path>
         </svg>
         <span>Left</span>
       </button>
-      <button class="tool-button" id="rotateRightButton" title="Rotate 90° right (Shift+R)" disabled>
+      <button class="tool-button" id="rotateRightButton" title="Rotate 90 degrees right (Shift+R)" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 7v6h-6"></path>
           <path d="M21 13a9 9 0 1 1-3-7.7L21 8"></path>
@@ -1255,7 +1750,100 @@ kbd {
     </div>
   </section>
 
-  <!-- Status bar -->
+  <!-- ---------------------------------------------------------------------
+       TEXT MODE TOOLBAR
+       --------------------------------------------------------------------- -->
+  <section class="toolbar" id="textToolbar" style="display: none;">
+    <div class="toolbar-group">
+      <button class="tool-button is-tool-active" id="toolSelectButton" data-tool="select" title="Click a line of text to rewrite it">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4l7 16 2-7 7-2z"></path>
+        </svg>
+        <span>Edit text</span>
+      </button>
+      <button class="tool-button" id="toolInsertButton" data-tool="insert" title="Click anywhere to drop in a new text box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7V5h16v2"></path>
+          <path d="M12 5v14"></path>
+          <path d="M9 19h6"></path>
+        </svg>
+        <span>Add text</span>
+      </button>
+      <button class="tool-button" id="toolWhiteoutButton" data-tool="whiteout" title="Drag a rectangle to paint over anything">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="12" rx="2"></rect>
+          <path d="M3 12h18"></path>
+        </svg>
+        <span>Whiteout</span>
+      </button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button class="tool-button" id="findReplaceButton" title="Find and replace across every page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="10" r="6"></circle>
+          <path d="M20 20l-5.4-5.4"></path>
+        </svg>
+        <span>Find &amp; replace</span>
+      </button>
+      <button class="tool-button" id="copyPageTextButton" title="Copy every word on this page to the clipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>Copy text</span>
+      </button>
+      <button class="tool-button" id="toggleRunOutlinesButton" title="Show the boxes pdf.js found around every text run">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="5" rx="1"></rect>
+          <rect x="3" y="14" width="12" height="5" rx="1"></rect>
+        </svg>
+        <span>Show runs</span>
+      </button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button class="tool-button" id="previewResultButton" title="Render this page exactly as it will export">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        <span>Preview result</span>
+      </button>
+      <button class="tool-button is-danger" id="clearPageEditsButton" title="Remove every edit on this page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18"></path>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+        </svg>
+        <span>Clear edits</span>
+      </button>
+    </div>
+
+    <div class="status-spacer"></div>
+
+    <div class="page-stepper">
+      <button class="mini-button" id="editorPrevPageButton">Prev</button>
+      <input type="number" id="editorPageInput" min="1" value="1" />
+      <span id="editorPageTotal">of 1</span>
+      <button class="mini-button" id="editorNextPageButton">Next</button>
+    </div>
+
+    <div class="zoom-control">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="M21 21l-4.3-4.3"></path>
+      </svg>
+      <input type="range" id="editorZoomSlider" min="60" max="220" step="10" value="120" aria-label="Editor zoom" />
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------------
+       STATUS BAR (shared, contents adapt to the mode)
+       --------------------------------------------------------------------- -->
   <section class="status-bar" id="statusBar" style="display: none;">
     <div class="status-metric">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1264,7 +1852,7 @@ kbd {
       </svg>
       <strong id="pageCountText">0</strong> pages
     </div>
-    <div class="status-metric">
+    <div class="status-metric" id="selectedMetric">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M20 6L9 17l-5-5"></path>
       </svg>
@@ -1277,10 +1865,17 @@ kbd {
       </svg>
       <strong id="clipboardCountText">0</strong> on clipboard
     </div>
+    <div class="status-metric is-edit" id="editMetric" style="display: none;">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 20h9"></path>
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path>
+      </svg>
+      <strong id="editCountText">0</strong> text edits
+    </div>
 
     <div class="status-spacer"></div>
 
-    <div class="selection-tools">
+    <div class="selection-tools" id="selectionTools">
       <button class="mini-button" id="selectAllButton">All</button>
       <button class="mini-button" id="selectNoneButton">None</button>
       <button class="mini-button" id="selectInvertButton">Invert</button>
@@ -1291,21 +1886,154 @@ kbd {
     </div>
   </section>
 
-  <!-- Page grid -->
-  <section class="page-grid" id="pageGrid"></section>
+  <!-- ---------------------------------------------------------------------
+       PAGES MODE BODY
+       --------------------------------------------------------------------- -->
+  <div id="pagesModeBody">
+    <section class="page-grid" id="pageGrid"></section>
 
-  <!-- Source files panel -->
-  <section class="panel" id="sourcePanel" style="display: none;">
-    <h2 class="panel-title">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg>
-      Imported files
-    </h2>
-    <div class="source-list" id="sourceList"></div>
-  </section>
+    <section class="panel" id="sourcePanel" style="display: none;">
+      <h2 class="panel-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Imported files
+      </h2>
+      <div class="source-list" id="sourceList"></div>
+    </section>
+  </div>
 
-  <!-- Export panel -->
+  <!-- ---------------------------------------------------------------------
+       TEXT MODE BODY
+       --------------------------------------------------------------------- -->
+  <div id="textModeBody" style="display: none;">
+    <div class="text-mode-layout">
+
+      <div class="canvas-column">
+        <div class="editor-stage" id="editorStage">
+          <canvas id="editorCanvas"></canvas>
+          <div class="text-overlay" id="textOverlay"></div>
+        </div>
+        <p class="canvas-hint" id="canvasHint">
+          Click any line of text to rewrite it. Shift-click a second run on the same line to
+          edit them together. The original is covered with the sampled paper colour, then the
+          new words are drawn at the same baseline.
+        </p>
+      </div>
+
+      <aside class="inspector">
+
+        <div class="inspector-card">
+          <div class="inspector-title">
+            <span id="inspectorHeading">Nothing picked</span>
+            <button class="mini-button" id="deselectObjectButton" style="display: none;">Clear</button>
+          </div>
+
+          <div id="inspectorEmpty" class="inspector-empty">
+            Pick a line of text on the page, drop in a new text box with the Add text tool,
+            or drag out a whiteout rectangle.
+          </div>
+
+          <div id="inspectorEditor" style="display: none;">
+            <div class="original-text-preview" id="originalTextPreview"></div>
+
+            <textarea class="replacement-input" id="replacementInput"
+                      placeholder="Type the replacement text" spellcheck="true"></textarea>
+
+            <div class="property-grid">
+              <div class="property-field">
+                <label for="editFontSelect">Font</label>
+                <select id="editFontSelect">
+                  <option value="Helvetica">Helvetica</option>
+                  <option value="HelveticaBold">Helvetica Bold</option>
+                  <option value="HelveticaOblique">Helvetica Italic</option>
+                  <option value="HelveticaBoldOblique">Helvetica Bold Italic</option>
+                  <option value="TimesRoman">Times</option>
+                  <option value="TimesRomanBold">Times Bold</option>
+                  <option value="TimesRomanItalic">Times Italic</option>
+                  <option value="TimesRomanBoldItalic">Times Bold Italic</option>
+                  <option value="Courier">Courier</option>
+                  <option value="CourierBold">Courier Bold</option>
+                  <option value="CourierOblique">Courier Italic</option>
+                  <option value="CourierBoldOblique">Courier Bold Italic</option>
+                </select>
+              </div>
+              <div class="property-field">
+                <label for="editFontSizeInput">Size (pt)</label>
+                <input type="number" id="editFontSizeInput" min="3" max="120" step="0.5" value="11" />
+              </div>
+              <div class="property-field">
+                <label for="editTextColorInput">Text colour</label>
+                <input type="color" id="editTextColorInput" value="#1A1A1A" />
+              </div>
+              <div class="property-field">
+                <label for="editCoverColorInput">Cover colour</label>
+                <input type="color" id="editCoverColorInput" value="#FFFFFF" />
+              </div>
+              <div class="property-field">
+                <label for="editOffsetXInput">Nudge X (pt)</label>
+                <input type="number" id="editOffsetXInput" step="0.5" value="0" />
+              </div>
+              <div class="property-field">
+                <label for="editOffsetYInput">Nudge Y (pt)</label>
+                <input type="number" id="editOffsetYInput" step="0.5" value="0" />
+              </div>
+              <div class="property-field">
+                <label for="editCoverPaddingInput">Cover pad (pt)</label>
+                <input type="number" id="editCoverPaddingInput" min="0" max="20" step="0.5" value="1" />
+              </div>
+              <div class="property-field">
+                <label for="editAlignSelect">Align in box</label>
+                <select id="editAlignSelect">
+                  <option value="left">Left</option>
+                  <option value="center">Centre</option>
+                  <option value="right">Right</option>
+                </select>
+              </div>
+            </div>
+
+            <label class="checkbox-row" style="margin-top: 10px; font-size: 0.78rem;">
+              <input type="checkbox" id="editShrinkToFitInput" checked />
+              Shrink the text if it overruns the original width
+            </label>
+
+            <label class="checkbox-row" style="margin-top: 6px; font-size: 0.78rem;">
+              <input type="checkbox" id="editDrawCoverInput" checked />
+              Paint the cover rectangle
+            </label>
+
+            <div class="button-row" style="margin-top: 12px;">
+              <button class="primary-button is-edit compact-button" id="applyEditButton">Apply</button>
+              <button class="secondary-button compact-button" id="removeEditButton">Remove</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="inspector-card">
+          <div class="inspector-title">
+            <span>Edits on this page</span>
+            <span id="pageEditCountLabel" style="color: var(--edit-dark);">0</span>
+          </div>
+          <div class="edit-list" id="editList"></div>
+          <div class="inspector-empty" id="editListEmpty">No edits on this page yet.</div>
+        </div>
+
+        <div class="inspector-card">
+          <div class="inspector-title"><span>Sampled colours</span></div>
+          <div class="inspector-empty">
+            The cover colour is picked automatically from the pixels surrounding the text you
+            select, so edits on tinted or shaded paper blend in rather than showing a white patch.
+            Override it above whenever the sample guesses wrong.
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </div>
+
+  <!-- ---------------------------------------------------------------------
+       EXPORT PANEL (shared by both modes)
+       --------------------------------------------------------------------- -->
   <section class="panel" id="exportPanel" style="display: none;">
     <h2 class="panel-title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1391,7 +2119,6 @@ kbd {
   </section>
 </main>
 
-<!-- Hidden file input -->
 <input type="file" id="fileInput" accept="application/pdf,image/png,image/jpeg" multiple style="display: none;" />
 
 <!-- ==========================================================================
@@ -1419,10 +2146,112 @@ kbd {
 </div>
 
 <!-- ==========================================================================
+     FIND AND REPLACE MODAL
+     ========================================================================== -->
+<div class="modal-backdrop" id="findReplaceModal">
+  <div class="modal-card" style="width: min(620px, 96vw);">
+    <div class="modal-header">
+      <span class="modal-title">Find and replace across the document</span>
+      <button class="icon-button" id="findReplaceCloseButton" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="explainer-note">
+        <strong>How this works.</strong> Every page is scanned for text runs containing your
+        search term. Each match becomes a cover-and-redraw edit that you can still adjust or
+        remove individually afterwards. A run is the unit a PDF stores — usually a line or a
+        fragment of one — so a phrase split across two runs will not be found.
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label for="findTermInput">Find</label>
+          <input type="text" id="findTermInput" placeholder="e.g. 2025" spellcheck="false" />
+        </div>
+        <div class="field field-grow">
+          <label for="replaceTermInput">Replace with</label>
+          <input type="text" id="replaceTermInput" placeholder="e.g. 2026" spellcheck="false" />
+        </div>
+      </div>
+
+      <label class="checkbox-row"><input type="checkbox" id="matchCaseInput" /> Match case</label>
+      <label class="checkbox-row" style="margin-top: 6px;">
+        <input type="checkbox" id="wholeWordInput" /> Whole words only
+      </label>
+      <label class="checkbox-row" style="margin-top: 6px;">
+        <input type="checkbox" id="scanSelectedOnlyInput" /> Limit to the pages selected in Pages mode
+      </label>
+
+      <div class="replace-results" id="replaceResults" style="display: none;"></div>
+
+      <div class="action-row">
+        <button class="secondary-button" id="findScanButton">Find matches</button>
+        <button class="primary-button is-edit" id="replaceAllButton" disabled>Replace all</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     EXPLAINER MODAL
+     ========================================================================== -->
+<div class="modal-backdrop" id="explainerModal">
+  <div class="modal-card" style="width: min(660px, 96vw);">
+    <div class="modal-header">
+      <span class="modal-title">How the text editing works</span>
+      <button class="icon-button" id="explainerCloseButton" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size: 0.92rem; color: var(--text-secondary); margin-bottom: 14px;">
+        A PDF does not store text the way a word processor does. It stores glyph codes placed by
+        explicit position matrices, drawn using fonts that are normally <strong>subsetted</strong> —
+        only the glyphs the document already uses are embedded in the file. Genuine in-place
+        editing would mean rewriting the page content stream and re-encoding characters against a
+        font that may simply not contain the letters you want to type. No browser library does this.
+      </p>
+
+      <p style="font-size: 0.92rem; color: var(--text-secondary); margin-bottom: 14px;">
+        So this editor <strong>covers and redraws</strong> instead. When you pick a line, its exact
+        baseline, width and font size are read from the page. The colour immediately around it is
+        sampled off the rendered pixels, a rectangle in that colour is painted over the original,
+        and your replacement is drawn at the same baseline using whichever of the standard fonts
+        best matches the original's weight and slant.
+      </p>
+
+      <div class="explainer-note" style="margin-bottom: 14px;">
+        <strong>Works beautifully for:</strong> names, dates, numbers, marks, headers, titles,
+        single-line labels, typo fixes, and rolling a worksheet forward a year.
+      </div>
+
+      <div class="explainer-note" style="background: var(--danger-bg); border-color: var(--danger-light); color: #7A3A3A;">
+        <strong style="color: #A33A3A;">Expect trouble with:</strong> text sitting on photographs
+        or gradients, where a flat cover rectangle will show; justified multi-line paragraphs,
+        which would need real reflowing; unusual embedded fonts whose letter widths differ
+        noticeably from the standard set; and scanned documents, which hold no text objects at
+        all — only pixels. On a scan the page will simply report no editable runs.
+      </div>
+
+      <p style="font-size: 0.92rem; color: var(--text-secondary); margin-top: 14px;">
+        Every edit stays live and reversible until you export. Nothing is baked into the file until
+        you press Download, so you can adjust the cover colour, nudge the baseline, or delete an
+        edit entirely at any point.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
      SHORTCUTS MODAL
      ========================================================================== -->
 <div class="modal-backdrop" id="shortcutsModal">
-  <div class="modal-card" style="width: min(560px, 96vw);">
+  <div class="modal-card" style="width: min(580px, 96vw);">
     <div class="modal-header">
       <span class="modal-title">Keyboard shortcuts</span>
       <button class="icon-button" id="shortcutsCloseButton" aria-label="Close">
@@ -1433,11 +2262,11 @@ kbd {
     </div>
     <div class="modal-body">
       <table class="shortcut-table">
+        <tr><td colspan="2" class="shortcut-section-heading">Pages mode</td></tr>
         <tr><td><kbd>Click</kbd></td><td>Select a single page</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Click</kbd></td><td>Add or remove one page from the selection</td></tr>
         <tr><td><kbd>Shift</kbd> + <kbd>Click</kbd></td><td>Select a continuous run of pages</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select every page</td></tr>
-        <tr><td><kbd>Esc</kbd></td><td>Clear the selection or close a dialog</td></tr>
         <tr><td><kbd>Delete</kbd></td><td>Delete the selected pages</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>X</kbd></td><td>Cut the selected pages</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>C</kbd></td><td>Copy the selected pages</td></tr>
@@ -1445,9 +2274,19 @@ kbd {
         <tr><td><kbd>Ctrl</kbd> + <kbd>D</kbd></td><td>Duplicate the selected pages</td></tr>
         <tr><td><kbd>Shift</kbd> + <kbd>L</kbd> / <kbd>R</kbd></td><td>Rotate the selection left or right</td></tr>
         <tr><td><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Move the selection earlier or later</td></tr>
+
+        <tr><td colspan="2" class="shortcut-section-heading">Text mode</td></tr>
+        <tr><td><kbd>Click</kbd> a run</td><td>Pick that line of text for rewriting</td></tr>
+        <tr><td><kbd>Shift</kbd> + <kbd>Click</kbd></td><td>Extend the pick across neighbouring runs</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Apply the edit currently being typed</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>Open find and replace</td></tr>
+        <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Move to the previous or next page</td></tr>
+
+        <tr><td colspan="2" class="shortcut-section-heading">Anywhere</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>S</kbd></td><td>Download the edited PDF</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Clear the selection or close a dialog</td></tr>
         <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Move through pages while previewing</td></tr>
       </table>
     </div>
@@ -1464,29 +2303,35 @@ kbd {
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
 </div>
 
-<div class="version-badge">Polymath PDF Studio v1.0.0</div>
+<div class="version-badge">Polymath PDF Studio v2.0.0</div>
 
 <script>
 /* ==========================================================================
-   POLYMATH PDF STUDIO — APPLICATION SCRIPT
+   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.0.0
    ==========================================================================
    Deliberately verbose and unminified so it stays easy to read and extend.
+
    Section map:
      1.  Library setup and constants
      2.  Application state
      3.  Small utility helpers
-     4.  Toast + progress feedback
+     4.  Toast and progress feedback
      5.  Source file importing
      6.  Thumbnail rendering pipeline
      7.  History (undo / redo)
      8.  Selection management
-     9.  Page operations (delete, duplicate, rotate, move, clipboard)
+     9.  Page operations
      10. Grid rendering
      11. Drag-and-drop reordering
      12. Preview modal
-     13. Export / build pipeline
-     14. Keyboard shortcuts
-     15. Event wiring and boot
+     13. TEXT ENGINE — geometry, colour sampling, font matching
+     14. TEXT MODE — page rendering and the interactive overlay
+     15. TEXT MODE — the inspector panel
+     16. TEXT MODE — find and replace
+     17. Export and build pipeline
+     18. Mode switching
+     19. Keyboard shortcuts
+     20. Event wiring and boot
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -1517,16 +2362,36 @@ const THUMBNAIL_RENDER_WIDTH = 260;
 /* How many history snapshots we retain before dropping the oldest. */
 const MAXIMUM_HISTORY_DEPTH = 60;
 
+/* A cover rectangle is grown by this fraction of the font size above the
+   baseline and below it, so ascenders and descenders are fully hidden. */
+const COVER_ASCENT_FACTOR = 0.86;
+const COVER_DESCENT_FACTOR = 0.26;
+
+/* Every standard font pdf-lib can embed without shipping font data. */
+const STANDARD_FONT_LOOKUP = {
+  Helvetica: PDFLibStandardFonts.Helvetica,
+  HelveticaBold: PDFLibStandardFonts.HelveticaBold,
+  HelveticaOblique: PDFLibStandardFonts.HelveticaOblique,
+  HelveticaBoldOblique: PDFLibStandardFonts.HelveticaBoldOblique,
+  TimesRoman: PDFLibStandardFonts.TimesRoman,
+  TimesRomanBold: PDFLibStandardFonts.TimesRomanBold,
+  TimesRomanItalic: PDFLibStandardFonts.TimesRomanItalic,
+  TimesRomanBoldItalic: PDFLibStandardFonts.TimesRomanBoldItalic,
+  Courier: PDFLibStandardFonts.Courier,
+  CourierBold: PDFLibStandardFonts.CourierBold,
+  CourierOblique: PDFLibStandardFonts.CourierOblique,
+  CourierBoldOblique: PDFLibStandardFonts.CourierBoldOblique
+};
+
 /* --------------------------------------------------------------------------
    2. APPLICATION STATE
    -------------------------------------------------------------------------- */
 
 /**
- * sourceLibrary maps a generated source id to an object shaped like:
+ * sourceLibrary maps a generated source id to:
  * {
  *   id, displayName, swatchColor, initialLetter,
- *   originalBytes (Uint8Array), pdfjsDocument, pdflibDocument,
- *   pageCount, byteLength
+ *   pdfjsDocument, pdflibDocument, pageCount, byteLength
  * }
  */
 const sourceLibrary = new Map();
@@ -1535,11 +2400,33 @@ const sourceLibrary = new Map();
  * pageList is the ordered working document. Each entry:
  * {
  *   uniqueId, sourceId, sourcePageIndex,
- *   userRotation (0/90/180/270), basePageRotation,
+ *   userRotation, basePageRotation,
  *   pointWidth, pointHeight, isBlank
  * }
  */
 let pageList = [];
+
+/**
+ * textEditsByPageId maps a page uniqueId to an array of edit operations.
+ * Every operation is expressed in PDF user space (origin bottom-left, points):
+ * {
+ *   editId,
+ *   kind: 'replace' | 'insert' | 'whiteout',
+ *   sourceRunIndexes: [numbers]   // replace only, for overlay matching
+ *   originalText,                 // replace only, for display
+ *   newText,
+ *   baselineX, baselineY,         // where the replacement text is drawn
+ *   coverX, coverY,               // bottom-left of the cover rectangle
+ *   coverWidth, coverHeight,
+ *   coverPadding,
+ *   fontKey, fontSize,
+ *   textColorHex, coverColorHex,
+ *   offsetX, offsetY,
+ *   alignment: 'left' | 'center' | 'right',
+ *   shrinkToFit, drawCover
+ * }
+ */
+const textEditsByPageId = new Map();
 
 /* Selection is stored as an ordered array of uniqueIds for predictable ops. */
 let selectedPageIds = [];
@@ -1547,7 +2434,7 @@ let selectedPageIds = [];
 /* The clipboard holds detached copies of page descriptors. */
 let clipboardPages = [];
 
-/* Undo/redo snapshots of pageList (deep copies). */
+/* Undo/redo snapshots of the whole editable state. */
 let undoHistoryStack = [];
 let redoHistoryStack = [];
 
@@ -1556,17 +2443,57 @@ let lastClickedPageId = null;
 
 /* Thumbnail cache keyed by "sourceId::pageIndex::rotation". */
 const thumbnailCache = new Map();
-
-/* Queue bookkeeping so we never render the same thumbnail twice at once. */
 const thumbnailRenderQueue = [];
 let isThumbnailQueueRunning = false;
 
-/* Counter used to mint unique page ids. */
+/* Counter used to mint unique ids. */
 let uniqueIdCounter = 0;
 
 /* Preview modal state. */
 let previewPageIndex = 0;
 let previewRenderToken = 0;
+
+/* Which half of the app is showing: 'pages' or 'text'. */
+let currentMode = 'pages';
+
+/* ---- Text mode state ---- */
+
+/* Index into pageList of the page currently open in the text editor. */
+let editorPageIndex = 0;
+
+/* The pdf.js viewport used for the current editor render — needed to convert
+   between screen pixels and PDF points in both directions. */
+let editorViewport = null;
+
+/* Text runs reported by pdf.js for the page currently open, each augmented
+   with the geometry we derive from its transform matrix. */
+let editorTextRuns = [];
+
+/* Which run indexes the user has picked (Shift-click extends this). */
+let pickedRunIndexes = [];
+
+/* When an existing edit is open in the inspector, its id lives here. */
+let pickedEditId = null;
+
+/* Active drawing tool: 'select', 'insert' or 'whiteout'. */
+let activeTextTool = 'select';
+
+/* Guards against two editor renders racing each other. */
+let editorRenderToken = 0;
+
+/* Whether every text run should show its outline. */
+let showRunOutlines = false;
+
+/* Cached page text content keyed by "sourceId::pageIndex" so find-and-replace
+   and repeated page visits do not re-parse the same page. */
+const pageTextContentCache = new Map();
+
+/* Matches produced by the last find-and-replace scan. */
+let pendingReplaceMatches = [];
+
+/* Whiteout marquee bookkeeping. */
+let marqueeElement = null;
+let marqueeStartPoint = null;
 
 /* --------------------------------------------------------------------------
    3. SMALL UTILITY HELPERS
@@ -1597,10 +2524,38 @@ function waitForMilliseconds(duration) {
   return new Promise(function (resolve) { setTimeout(resolve, duration); });
 }
 
+function clampNumber(value, lowerBound, upperBound) {
+  return Math.min(upperBound, Math.max(lowerBound, value));
+}
+
 /* Normalises any rotation value into 0, 90, 180 or 270. */
 function normaliseRotation(angle) {
-  const wrapped = ((Math.round(angle / 90) * 90) % 360 + 360) % 360;
-  return wrapped;
+  return ((Math.round(angle / 90) * 90) % 360 + 360) % 360;
+}
+
+/* Converts "#RRGGBB" into the 0-1 channel triple pdf-lib expects. */
+function hexToRgbChannels(hexColor) {
+  const cleaned = String(hexColor || '#000000').replace('#', '');
+  const expanded = cleaned.length === 3
+    ? cleaned[0] + cleaned[0] + cleaned[1] + cleaned[1] + cleaned[2] + cleaned[2]
+    : cleaned;
+  const redChannel = parseInt(expanded.slice(0, 2), 16) / 255;
+  const greenChannel = parseInt(expanded.slice(2, 4), 16) / 255;
+  const blueChannel = parseInt(expanded.slice(4, 6), 16) / 255;
+  return {
+    red: isNaN(redChannel) ? 0 : redChannel,
+    green: isNaN(greenChannel) ? 0 : greenChannel,
+    blue: isNaN(blueChannel) ? 0 : blueChannel
+  };
+}
+
+/* Converts 0-255 channel values into "#RRGGBB". */
+function rgbBytesToHex(redByte, greenByte, blueByte) {
+  function toPair(value) {
+    const clamped = clampNumber(Math.round(value), 0, 255);
+    return clamped.toString(16).padStart(2, '0');
+  }
+  return '#' + toPair(redByte) + toPair(greenByte) + toPair(blueByte);
 }
 
 /* Returns a detached duplicate of a page descriptor with a brand new id. */
@@ -1634,8 +2589,29 @@ function getSelectedIndexesSorted() {
   return indexes;
 }
 
+/* Every edit attached to a page, or an empty array. */
+function getEditsForPage(pageUniqueId) {
+  return textEditsByPageId.get(pageUniqueId) || [];
+}
+
+function setEditsForPage(pageUniqueId, editArray) {
+  if (!editArray || editArray.length === 0) {
+    textEditsByPageId.delete(pageUniqueId);
+  } else {
+    textEditsByPageId.set(pageUniqueId, editArray);
+  }
+}
+
+function countAllTextEdits() {
+  let runningTotal = 0;
+  pageList.forEach(function (pageEntry) {
+    runningTotal += getEditsForPage(pageEntry.uniqueId).length;
+  });
+  return runningTotal;
+}
+
 /* --------------------------------------------------------------------------
-   4. TOAST + PROGRESS FEEDBACK
+   4. TOAST AND PROGRESS FEEDBACK
    -------------------------------------------------------------------------- */
 
 function showToast(message, variant) {
@@ -1672,9 +2648,6 @@ function closeProgressOverlay() {
    5. SOURCE FILE IMPORTING
    -------------------------------------------------------------------------- */
 
-/**
- * Reads a File object into a Uint8Array.
- */
 function readFileAsUint8Array(file) {
   return new Promise(function (resolve, reject) {
     const fileReader = new FileReader();
@@ -1684,9 +2657,7 @@ function readFileAsUint8Array(file) {
   });
 }
 
-/**
- * Wraps a PNG/JPG image into a single-page PDF so it can join the document.
- */
+/** Wraps a PNG/JPG image into a single-page PDF so it can join the document. */
 async function convertImageToPdfBytes(imageBytes, mimeType) {
   const imageDocument = await PDFLibDocument.create();
   let embeddedImage;
@@ -1697,7 +2668,6 @@ async function convertImageToPdfBytes(imageBytes, mimeType) {
     embeddedImage = await imageDocument.embedJpg(imageBytes);
   }
 
-  /* Fit the image onto an A4 page while preserving its aspect ratio. */
   const maximumWidth = BLANK_PAGE_WIDTH_POINTS - 40;
   const maximumHeight = BLANK_PAGE_HEIGHT_POINTS - 40;
   const widthScale = maximumWidth / embeddedImage.width;
@@ -1717,9 +2687,7 @@ async function convertImageToPdfBytes(imageBytes, mimeType) {
   return imageDocument.save();
 }
 
-/**
- * Registers a set of PDF bytes as a reusable source and returns its record.
- */
+/** Registers a set of PDF bytes as a reusable source and returns its record. */
 async function registerPdfSource(pdfBytes, displayName) {
   const sourceId = createUniqueId('source');
 
@@ -1729,10 +2697,7 @@ async function registerPdfSource(pdfBytes, displayName) {
 
   const loadingTask = pdfjsLib.getDocument({ data: bytesForPdfJs });
   const pdfjsDocument = await loadingTask.promise;
-
-  const pdflibDocument = await PDFLibDocument.load(bytesForPdfLib, {
-    ignoreEncryption: true
-  });
+  const pdflibDocument = await PDFLibDocument.load(bytesForPdfLib, { ignoreEncryption: true });
 
   const swatchIndex = sourceLibrary.size % SOURCE_SWATCH_COLORS.length;
 
@@ -1751,9 +2716,7 @@ async function registerPdfSource(pdfBytes, displayName) {
   return sourceRecord;
 }
 
-/**
- * Builds page descriptors for every page of a freshly registered source.
- */
+/** Builds page descriptors for every page of a freshly registered source. */
 async function buildPageDescriptorsForSource(sourceRecord) {
   const descriptors = [];
 
@@ -1776,10 +2739,7 @@ async function buildPageDescriptorsForSource(sourceRecord) {
   return descriptors;
 }
 
-/**
- * Main import entry point — handles a FileList of PDFs and/or images.
- * insertAtIndex of null means "append to the end of the document".
- */
+/** Main import entry point — handles a FileList of PDFs and/or images. */
 async function importFiles(fileList, insertAtIndex) {
   const files = Array.from(fileList).filter(function (file) {
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
@@ -1821,7 +2781,6 @@ async function importFiles(fileList, insertAtIndex) {
   }
 
   closeProgressOverlay();
-
   if (newDescriptors.length === 0) { return; }
 
   if (insertAtIndex === null || insertAtIndex === undefined || insertAtIndex >= pageList.length) {
@@ -1849,9 +2808,6 @@ function buildThumbnailCacheKey(pageEntry) {
   return pageEntry.sourceId + '::' + pageEntry.sourcePageIndex + '::' + totalRotation;
 }
 
-/**
- * Renders a single page to a data URL using pdf.js.
- */
 async function renderThumbnailForPage(pageEntry) {
   const sourceRecord = sourceLibrary.get(pageEntry.sourceId);
   if (!sourceRecord) { return null; }
@@ -1870,24 +2826,16 @@ async function renderThumbnailForPage(pageEntry) {
   drawingContext.fillStyle = '#FFFFFF';
   drawingContext.fillRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
 
-  await pdfjsPage.render({
-    canvasContext: drawingContext,
-    viewport: scaledViewport
-  }).promise;
-
+  await pdfjsPage.render({ canvasContext: drawingContext, viewport: scaledViewport }).promise;
   return offscreenCanvas.toDataURL('image/jpeg', 0.82);
 }
 
-/**
- * Queues a thumbnail request; the queue renders one page at a time so the
- * browser stays responsive even with a 300-page document.
- */
 function queueThumbnailRender(pageEntry) {
   const cacheKey = buildThumbnailCacheKey(pageEntry);
   if (thumbnailCache.has(cacheKey)) { return; }
 
-  const alreadyQueued = thumbnailRenderQueue.some(function (queuedKey) {
-    return queuedKey.cacheKey === cacheKey;
+  const alreadyQueued = thumbnailRenderQueue.some(function (queuedItem) {
+    return queuedItem.cacheKey === cacheKey;
   });
   if (alreadyQueued) { return; }
 
@@ -1901,7 +2849,6 @@ async function runThumbnailQueue() {
 
   while (thumbnailRenderQueue.length > 0) {
     const queueItem = thumbnailRenderQueue.shift();
-
     if (thumbnailCache.has(queueItem.cacheKey)) { continue; }
 
     try {
@@ -1914,16 +2861,12 @@ async function runThumbnailQueue() {
       console.error('Thumbnail render failed', renderError);
     }
 
-    /* Yield to the event loop so scrolling and clicking stay smooth. */
     await waitForMilliseconds(0);
   }
 
   isThumbnailQueueRunning = false;
 }
 
-/**
- * Updates any card currently on screen that is waiting for this thumbnail.
- */
 function applyThumbnailToVisibleCards(cacheKey, dataUrl) {
   const waitingFrames = document.querySelectorAll('[data-cache-key="' + cacheKey + '"]');
   waitingFrames.forEach(function (frameElement) {
@@ -1941,68 +2884,64 @@ function applyThumbnailToVisibleCards(cacheKey, dataUrl) {
    7. HISTORY (UNDO / REDO)
    -------------------------------------------------------------------------- */
 
-function snapshotCurrentPageList() {
-  return pageList.map(function (pageEntry) {
-    return {
-      uniqueId: pageEntry.uniqueId,
-      sourceId: pageEntry.sourceId,
-      sourcePageIndex: pageEntry.sourcePageIndex,
-      userRotation: pageEntry.userRotation,
-      basePageRotation: pageEntry.basePageRotation,
-      pointWidth: pageEntry.pointWidth,
-      pointHeight: pageEntry.pointHeight,
-      isBlank: pageEntry.isBlank
-    };
+/* A snapshot captures both the page order AND every text edit, so undo works
+   identically in either mode. */
+function captureStateSnapshot() {
+  const editsSnapshot = {};
+  textEditsByPageId.forEach(function (editArray, pageUniqueId) {
+    editsSnapshot[pageUniqueId] = editArray.map(function (editOperation) {
+      return Object.assign({}, editOperation);
+    });
+  });
+
+  return {
+    pages: pageList.map(function (pageEntry) { return Object.assign({}, pageEntry); }),
+    selection: selectedPageIds.slice(0),
+    edits: editsSnapshot
+  };
+}
+
+function restoreStateSnapshot(snapshot) {
+  pageList = snapshot.pages.map(function (pageEntry) { return Object.assign({}, pageEntry); });
+
+  textEditsByPageId.clear();
+  Object.keys(snapshot.edits).forEach(function (pageUniqueId) {
+    textEditsByPageId.set(pageUniqueId, snapshot.edits[pageUniqueId].map(function (editOperation) {
+      return Object.assign({}, editOperation);
+    }));
+  });
+
+  selectedPageIds = snapshot.selection.filter(function (uniqueId) {
+    return findPageIndexById(uniqueId) !== -1;
   });
 }
 
 function pushHistorySnapshot() {
-  undoHistoryStack.push({
-    pages: snapshotCurrentPageList(),
-    selection: selectedPageIds.slice(0)
-  });
-
-  if (undoHistoryStack.length > MAXIMUM_HISTORY_DEPTH) {
-    undoHistoryStack.shift();
-  }
-
+  undoHistoryStack.push(captureStateSnapshot());
+  if (undoHistoryStack.length > MAXIMUM_HISTORY_DEPTH) { undoHistoryStack.shift(); }
   redoHistoryStack = [];
   updateHistoryButtons();
 }
 
 function performUndo() {
   if (undoHistoryStack.length === 0) { return; }
+  redoHistoryStack.push(captureStateSnapshot());
+  restoreStateSnapshot(undoHistoryStack.pop());
 
-  redoHistoryStack.push({
-    pages: snapshotCurrentPageList(),
-    selection: selectedPageIds.slice(0)
-  });
-
-  const previousState = undoHistoryStack.pop();
-  pageList = previousState.pages;
-  selectedPageIds = previousState.selection.filter(function (uniqueId) {
-    return findPageIndexById(uniqueId) !== -1;
-  });
-
+  editorPageIndex = clampNumber(editorPageIndex, 0, Math.max(0, pageList.length - 1));
   renderEverything();
+  if (currentMode === 'text') { openEditorPage(editorPageIndex); }
   showToast('Undone.');
 }
 
 function performRedo() {
   if (redoHistoryStack.length === 0) { return; }
+  undoHistoryStack.push(captureStateSnapshot());
+  restoreStateSnapshot(redoHistoryStack.pop());
 
-  undoHistoryStack.push({
-    pages: snapshotCurrentPageList(),
-    selection: selectedPageIds.slice(0)
-  });
-
-  const nextState = redoHistoryStack.pop();
-  pageList = nextState.pages;
-  selectedPageIds = nextState.selection.filter(function (uniqueId) {
-    return findPageIndexById(uniqueId) !== -1;
-  });
-
+  editorPageIndex = clampNumber(editorPageIndex, 0, Math.max(0, pageList.length - 1));
   renderEverything();
+  if (currentMode === 'text') { openEditorPage(editorPageIndex); }
   showToast('Redone.');
 }
 
@@ -2062,14 +3001,12 @@ function handleCardClick(uniqueId, clickEvent) {
   } else if (usesModifierToggle) {
     toggleSelection(uniqueId);
     lastClickedPageId = uniqueId;
+  } else if (selectedPageIds.length === 1 && selectedPageIds[0] === uniqueId) {
+    setSelection([]);
+    lastClickedPageId = null;
   } else {
-    if (selectedPageIds.length === 1 && selectedPageIds[0] === uniqueId) {
-      setSelection([]);
-      lastClickedPageId = null;
-    } else {
-      setSelection([uniqueId]);
-      lastClickedPageId = uniqueId;
-    }
+    setSelection([uniqueId]);
+    lastClickedPageId = uniqueId;
   }
 }
 
@@ -2092,16 +3029,13 @@ function invertSelection() {
 function selectByParity(wantOddPositions) {
   const matching = [];
   pageList.forEach(function (pageEntry, index) {
-    const humanPosition = index + 1;
-    const isOdd = humanPosition % 2 === 1;
+    const isOdd = (index + 1) % 2 === 1;
     if (isOdd === wantOddPositions) { matching.push(pageEntry.uniqueId); }
   });
   setSelection(matching);
 }
 
-/**
- * Parses a range string like "1-4, 9, 12-14" into selected page ids.
- */
+/** Parses a range string like "1-4, 9, 12-14" into selected page ids. */
 function applyRangeSelection(rangeText) {
   const trimmedText = String(rangeText || '').trim();
   if (trimmedText.length === 0) {
@@ -2110,9 +3044,8 @@ function applyRangeSelection(rangeText) {
   }
 
   const matchedIds = [];
-  const segments = trimmedText.split(',');
 
-  segments.forEach(function (segment) {
+  trimmedText.split(',').forEach(function (segment) {
     const cleanSegment = segment.trim();
     if (cleanSegment.length === 0) { return; }
 
@@ -2120,11 +3053,8 @@ function applyRangeSelection(rangeText) {
     const singleMatch = cleanSegment.match(/^(\d+)$/);
 
     if (rangeMatch) {
-      const rangeStart = parseInt(rangeMatch[1], 10);
-      const rangeEnd = parseInt(rangeMatch[2], 10);
-      const lowerBound = Math.min(rangeStart, rangeEnd);
-      const upperBound = Math.max(rangeStart, rangeEnd);
-
+      const lowerBound = Math.min(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
+      const upperBound = Math.max(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
       for (let position = lowerBound; position <= upperBound; position += 1) {
         if (position >= 1 && position <= pageList.length) {
           matchedIds.push(pageList[position - 1].uniqueId);
@@ -2151,18 +3081,30 @@ function applyRangeSelection(rangeText) {
    9. PAGE OPERATIONS
    -------------------------------------------------------------------------- */
 
+/* Deleting a page must also drop the text edits attached to it, otherwise the
+   map slowly fills with orphaned entries. */
+function discardEditsForRemovedPages(survivingPages) {
+  const survivingIds = new Set(survivingPages.map(function (pageEntry) { return pageEntry.uniqueId; }));
+  const idsToDrop = [];
+  textEditsByPageId.forEach(function (unusedValue, pageUniqueId) {
+    if (!survivingIds.has(pageUniqueId)) { idsToDrop.push(pageUniqueId); }
+  });
+  idsToDrop.forEach(function (pageUniqueId) { textEditsByPageId.delete(pageUniqueId); });
+}
+
 function deleteSelectedPages() {
   if (selectedPageIds.length === 0) { return; }
 
   pushHistorySnapshot();
   const removedCount = selectedPageIds.length;
 
-  pageList = pageList.filter(function (pageEntry) {
-    return !isPageSelected(pageEntry.uniqueId);
-  });
+  pageList = pageList.filter(function (pageEntry) { return !isPageSelected(pageEntry.uniqueId); });
+  discardEditsForRemovedPages(pageList);
 
   selectedPageIds = [];
   lastClickedPageId = null;
+  editorPageIndex = clampNumber(editorPageIndex, 0, Math.max(0, pageList.length - 1));
+
   renderEverything();
   showToast('Deleted ' + removedCount + ' page' + (removedCount === 1 ? '' : 's') + '.');
 }
@@ -2170,9 +3112,24 @@ function deleteSelectedPages() {
 function deleteSinglePage(uniqueId) {
   pushHistorySnapshot();
   pageList = pageList.filter(function (pageEntry) { return pageEntry.uniqueId !== uniqueId; });
+  discardEditsForRemovedPages(pageList);
   selectedPageIds = selectedPageIds.filter(function (id) { return id !== uniqueId; });
+  editorPageIndex = clampNumber(editorPageIndex, 0, Math.max(0, pageList.length - 1));
   renderEverything();
   showToast('Page deleted.');
+}
+
+/* A duplicated page carries copies of its text edits, since the visual result
+   the user is duplicating includes those edits. */
+function copyEditsToNewPage(originalPageId, newPageId) {
+  const originalEdits = getEditsForPage(originalPageId);
+  if (originalEdits.length === 0) { return; }
+
+  setEditsForPage(newPageId, originalEdits.map(function (editOperation) {
+    const copied = Object.assign({}, editOperation);
+    copied.editId = createUniqueId('edit');
+    return copied;
+  }));
 }
 
 function duplicateSelectedPages() {
@@ -2183,7 +3140,10 @@ function duplicateSelectedPages() {
   const insertPosition = selectedIndexes[selectedIndexes.length - 1] + 1;
 
   const duplicates = selectedIndexes.map(function (index) {
-    return clonePageDescriptor(pageList[index]);
+    const originalPage = pageList[index];
+    const duplicate = clonePageDescriptor(originalPage);
+    copyEditsToNewPage(originalPage.uniqueId, duplicate.uniqueId);
+    return duplicate;
   });
 
   const head = pageList.slice(0, insertPosition);
@@ -2201,6 +3161,7 @@ function duplicateSinglePage(uniqueId) {
 
   pushHistorySnapshot();
   const duplicate = clonePageDescriptor(pageList[sourceIndex]);
+  copyEditsToNewPage(uniqueId, duplicate.uniqueId);
   pageList.splice(sourceIndex + 1, 0, duplicate);
   setSelection([duplicate.uniqueId]);
   renderEverything();
@@ -2232,7 +3193,11 @@ function copySelectedPages() {
   if (selectedPageIds.length === 0) { return; }
 
   clipboardPages = getSelectedIndexesSorted().map(function (index) {
-    return clonePageDescriptor(pageList[index]);
+    const copied = clonePageDescriptor(pageList[index]);
+    copied.carriedEdits = getEditsForPage(pageList[index].uniqueId).map(function (editOperation) {
+      return Object.assign({}, editOperation);
+    });
+    return copied;
   });
 
   updateStatusBar();
@@ -2245,13 +3210,19 @@ function cutSelectedPages() {
 
   pushHistorySnapshot();
   clipboardPages = getSelectedIndexesSorted().map(function (index) {
-    return clonePageDescriptor(pageList[index]);
+    const copied = clonePageDescriptor(pageList[index]);
+    copied.carriedEdits = getEditsForPage(pageList[index].uniqueId).map(function (editOperation) {
+      return Object.assign({}, editOperation);
+    });
+    return copied;
   });
 
   const cutCount = selectedPageIds.length;
   pageList = pageList.filter(function (pageEntry) { return !isPageSelected(pageEntry.uniqueId); });
+  discardEditsForRemovedPages(pageList);
   selectedPageIds = [];
   lastClickedPageId = null;
+  editorPageIndex = clampNumber(editorPageIndex, 0, Math.max(0, pageList.length - 1));
 
   renderEverything();
   showToast('Cut ' + cutCount + ' page' + (cutCount === 1 ? '' : 's') + '.');
@@ -2270,8 +3241,18 @@ function pasteClipboardPages() {
     ? selectedIndexes[selectedIndexes.length - 1] + 1
     : pageList.length;
 
-  const pastedPages = clipboardPages.map(function (pageEntry) {
-    return clonePageDescriptor(pageEntry);
+  const pastedPages = clipboardPages.map(function (clipboardEntry) {
+    const pastedPage = clonePageDescriptor(clipboardEntry);
+
+    if (clipboardEntry.carriedEdits && clipboardEntry.carriedEdits.length > 0) {
+      setEditsForPage(pastedPage.uniqueId, clipboardEntry.carriedEdits.map(function (editOperation) {
+        const copied = Object.assign({}, editOperation);
+        copied.editId = createUniqueId('edit');
+        return copied;
+      }));
+    }
+
+    return pastedPage;
   });
 
   const head = pageList.slice(0, insertPosition);
@@ -2293,7 +3274,6 @@ function insertBlankPage() {
     ? selectedIndexes[selectedIndexes.length - 1] + 1
     : pageList.length;
 
-  /* A blank page borrows the dimensions of the page it follows, when possible. */
   let blankWidth = BLANK_PAGE_WIDTH_POINTS;
   let blankHeight = BLANK_PAGE_HEIGHT_POINTS;
 
@@ -2326,7 +3306,6 @@ function moveSelection(directionOffset) {
   if (selectedPageIds.length === 0) { return; }
 
   const selectedIndexes = getSelectedIndexesSorted();
-
   if (directionOffset < 0 && selectedIndexes[0] === 0) { return; }
   if (directionOffset > 0 && selectedIndexes[selectedIndexes.length - 1] === pageList.length - 1) { return; }
 
@@ -2360,38 +3339,33 @@ function reverseDocumentOrder() {
 
 function clearWholeDocument() {
   if (pageList.length === 0) { return; }
-  const confirmed = window.confirm('Remove every page and start over?');
-  if (!confirmed) { return; }
+  if (!window.confirm('Remove every page and start over?')) { return; }
 
   pushHistorySnapshot();
   pageList = [];
+  textEditsByPageId.clear();
   selectedPageIds = [];
   lastClickedPageId = null;
+  editorPageIndex = 0;
+  switchToMode('pages');
   renderEverything();
   showToast('Workspace cleared.');
 }
 
-/**
- * Moves an arbitrary set of page ids so they land at a target index.
- * Used by the drag-and-drop handler.
- */
+/** Moves an arbitrary set of page ids so they land at a target index. */
 function movePagesToIndex(movingIds, targetIndex) {
   const movingSet = new Set(movingIds);
-
-  /* Work out which page currently sits at the drop point, so the insertion
-     position stays correct once the dragged pages are pulled out. */
   const pageAtTarget = targetIndex < pageList.length ? pageList[targetIndex] : null;
 
   const movingPages = pageList.filter(function (pageEntry) { return movingSet.has(pageEntry.uniqueId); });
   const remainingPages = pageList.filter(function (pageEntry) { return !movingSet.has(pageEntry.uniqueId); });
 
   let insertionIndex = remainingPages.length;
+
   if (pageAtTarget && !movingSet.has(pageAtTarget.uniqueId)) {
     insertionIndex = remainingPages.indexOf(pageAtTarget);
     if (insertionIndex === -1) { insertionIndex = remainingPages.length; }
   } else if (pageAtTarget && movingSet.has(pageAtTarget.uniqueId)) {
-    /* Dropping onto one of the dragged pages: fall back to the nearest
-       untouched neighbour ahead of the drop point. */
     let scanIndex = targetIndex;
     while (scanIndex < pageList.length && movingSet.has(pageList[scanIndex].uniqueId)) {
       scanIndex += 1;
@@ -2429,6 +3403,10 @@ const ICON_PREVIEW =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 
+const ICON_EDIT_TEXT =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
+
 const ICON_TRASH =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M3 6h18"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
@@ -2446,11 +3424,8 @@ function renderPageGrid() {
     cardElement.setAttribute('draggable', 'true');
     cardElement.style.animationDelay = Math.min(pageIndex * 12, 260) + 'ms';
 
-    if (isPageSelected(pageEntry.uniqueId)) {
-      cardElement.classList.add('is-selected');
-    }
+    if (isPageSelected(pageEntry.uniqueId)) { cardElement.classList.add('is-selected'); }
 
-    /* --- Selection badge --- */
     const selectionBadge = document.createElement('div');
     selectionBadge.className = 'selection-badge';
     selectionBadge.textContent = '✓';
@@ -2490,16 +3465,19 @@ function renderPageGrid() {
     cardActions.className = 'card-actions';
 
     const actionDefinitions = [
-      { label: 'Rotate left', icon: ICON_ROTATE_LEFT, action: 'rotate-left', danger: false },
-      { label: 'Rotate right', icon: ICON_ROTATE_RIGHT, action: 'rotate-right', danger: false },
-      { label: 'Duplicate', icon: ICON_DUPLICATE, action: 'duplicate', danger: false },
-      { label: 'Preview', icon: ICON_PREVIEW, action: 'preview', danger: false },
-      { label: 'Delete', icon: ICON_TRASH, action: 'delete', danger: true }
+      { label: 'Rotate left', icon: ICON_ROTATE_LEFT, action: 'rotate-left', style: '' },
+      { label: 'Rotate right', icon: ICON_ROTATE_RIGHT, action: 'rotate-right', style: '' },
+      { label: 'Edit the text on this page', icon: ICON_EDIT_TEXT, action: 'edit-text', style: ' is-edit' },
+      { label: 'Duplicate', icon: ICON_DUPLICATE, action: 'duplicate', style: '' },
+      { label: 'Preview', icon: ICON_PREVIEW, action: 'preview', style: '' },
+      { label: 'Delete', icon: ICON_TRASH, action: 'delete', style: ' is-danger' }
     ];
 
     actionDefinitions.forEach(function (definition) {
+      if (definition.action === 'edit-text' && pageEntry.isBlank) { return; }
+
       const actionButton = document.createElement('button');
-      actionButton.className = 'card-action-button' + (definition.danger ? ' is-danger' : '');
+      actionButton.className = 'card-action-button' + definition.style;
       actionButton.title = definition.label;
       actionButton.setAttribute('aria-label', definition.label);
       actionButton.setAttribute('data-action', definition.action);
@@ -2523,6 +3501,14 @@ function renderPageGrid() {
       rotationTag.className = 'rotation-tag';
       rotationTag.textContent = pageEntry.userRotation + '°';
       cardMeta.appendChild(rotationTag);
+    }
+
+    const editCount = getEditsForPage(pageEntry.uniqueId).length;
+    if (editCount > 0) {
+      const editMarker = document.createElement('span');
+      editMarker.className = 'edit-marker';
+      editMarker.textContent = editCount + ' edit' + (editCount === 1 ? '' : 's');
+      cardMeta.appendChild(editMarker);
     }
 
     const sourceRecord = pageEntry.sourceId ? sourceLibrary.get(pageEntry.sourceId) : null;
@@ -2549,8 +3535,7 @@ function renderPageGrid() {
 }
 
 function refreshSelectionVisuals() {
-  const allCards = document.querySelectorAll('.page-card');
-  allCards.forEach(function (cardElement) {
+  document.querySelectorAll('.page-card').forEach(function (cardElement) {
     const uniqueId = cardElement.getAttribute('data-uid');
     if (isPageSelected(uniqueId)) {
       cardElement.classList.add('is-selected');
@@ -2564,7 +3549,6 @@ function renderSourcePanel() {
   const sourceList = getElement('sourceList');
   sourceList.innerHTML = '';
 
-  /* Count how many pages from each source survive in the working document. */
   const usageCounts = new Map();
   pageList.forEach(function (pageEntry) {
     if (!pageEntry.sourceId) { return; }
@@ -2589,9 +3573,8 @@ function renderSourcePanel() {
     const detailLabel = document.createElement('span');
     detailLabel.className = 'source-detail';
     const inUseCount = usageCounts.get(sourceRecord.id) || 0;
-    detailLabel.textContent =
-      sourceRecord.pageCount + ' pages · ' + formatByteSize(sourceRecord.byteLength) +
-      ' · ' + inUseCount + ' in use';
+    detailLabel.textContent = sourceRecord.pageCount + ' pages · ' +
+      formatByteSize(sourceRecord.byteLength) + ' · ' + inUseCount + ' in use';
     rowElement.appendChild(detailLabel);
 
     const selectButton = document.createElement('button');
@@ -2627,6 +3610,15 @@ function updateStatusBar() {
   } else {
     clipboardMetric.style.display = 'none';
   }
+
+  const totalEdits = countAllTextEdits();
+  const editMetric = getElement('editMetric');
+  if (totalEdits > 0) {
+    editMetric.style.display = 'inline-flex';
+    getElement('editCountText').textContent = String(totalEdits);
+  } else {
+    editMetric.style.display = 'none';
+  }
 }
 
 function updateToolbarAvailability() {
@@ -2634,13 +3626,11 @@ function updateToolbarAvailability() {
   const hasPages = pageList.length > 0;
   const hasClipboard = clipboardPages.length > 0;
 
-  const selectionDependentIds = [
+  [
     'rotateLeftButton', 'rotateRightButton', 'cutButton', 'copyButton',
     'duplicateButton', 'deleteButton', 'moveLeftButton', 'moveRightButton',
     'downloadSelectedButton'
-  ];
-
-  selectionDependentIds.forEach(function (buttonId) {
+  ].forEach(function (buttonId) {
     getElement(buttonId).disabled = !hasSelection;
   });
 
@@ -2655,12 +3645,22 @@ function updateToolbarAvailability() {
 function updateLayoutVisibility() {
   const hasPages = pageList.length > 0;
   const hasSources = sourceLibrary.size > 0;
+  const inTextMode = currentMode === 'text';
 
   getElement('dropZone').style.display = hasPages ? 'none' : 'block';
-  getElement('toolbar').style.display = hasPages ? 'flex' : 'none';
+  getElement('modeSwitch').style.display = hasPages ? 'inline-flex' : 'none';
   getElement('statusBar').style.display = hasPages ? 'flex' : 'none';
   getElement('exportPanel').style.display = hasPages ? 'block' : 'none';
-  getElement('sourcePanel').style.display = hasSources ? 'block' : 'none';
+  getElement('sourcePanel').style.display = (hasSources && !inTextMode) ? 'block' : 'none';
+
+  getElement('pagesToolbar').style.display = (hasPages && !inTextMode) ? 'flex' : 'none';
+  getElement('textToolbar').style.display = (hasPages && inTextMode) ? 'flex' : 'none';
+  getElement('pagesModeBody').style.display = inTextMode ? 'none' : 'block';
+  getElement('textModeBody').style.display = (hasPages && inTextMode) ? 'block' : 'none';
+
+  /* The page-level selection tools only make sense in Pages mode. */
+  getElement('selectionTools').style.display = inTextMode ? 'none' : 'flex';
+  getElement('selectedMetric').style.display = inTextMode ? 'none' : 'inline-flex';
 }
 
 /** Single entry point that repaints the whole interface. */
@@ -2695,7 +3695,6 @@ function attachGridDragHandlers() {
 
     const uniqueId = cardElement.getAttribute('data-uid');
 
-    /* Dragging a selected card drags the whole selection with it. */
     if (isPageSelected(uniqueId) && selectedPageIds.length > 1) {
       draggedPageIds = getSelectedIndexesSorted().map(function (index) {
         return pageList[index].uniqueId;
@@ -2742,8 +3741,7 @@ function attachGridDragHandlers() {
     clearDropIndicators();
 
     if (cardElement) {
-      const targetUniqueId = cardElement.getAttribute('data-uid');
-      let targetIndex = findPageIndexById(targetUniqueId);
+      let targetIndex = findPageIndexById(cardElement.getAttribute('data-uid'));
       if (currentDropPlacesAfter) { targetIndex += 1; }
       movePagesToIndex(draggedPageIds, targetIndex);
     } else {
@@ -2770,7 +3768,6 @@ function attachGridDragHandlers() {
 
 async function openPreviewAtIndex(pageIndex) {
   if (pageIndex < 0 || pageIndex >= pageList.length) { return; }
-
   previewPageIndex = pageIndex;
   getElement('previewModal').classList.add('is-open');
   await renderPreviewCanvas();
@@ -2809,8 +3806,6 @@ async function renderPreviewCanvas() {
 
   const totalRotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
   const unitViewport = pdfjsPage.getViewport({ scale: 1, rotation: totalRotation });
-
-  /* Render at roughly twice the on-screen size for a crisp preview. */
   const targetPixelWidth = Math.min(1500, Math.max(700, window.innerWidth * 1.2));
   const renderScale = targetPixelWidth / unitViewport.width;
   const scaledViewport = pdfjsPage.getViewport({ scale: renderScale, rotation: totalRotation });
@@ -2821,10 +3816,7 @@ async function renderPreviewCanvas() {
   drawingContext.fillStyle = '#FFFFFF';
   drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-  await pdfjsPage.render({
-    canvasContext: drawingContext,
-    viewport: scaledViewport
-  }).promise;
+  await pdfjsPage.render({ canvasContext: drawingContext, viewport: scaledViewport }).promise;
 }
 
 async function stepPreview(offset) {
@@ -2834,14 +3826,1572 @@ async function stepPreview(offset) {
   await renderPreviewCanvas();
 }
 
-/* --------------------------------------------------------------------------
-   13. EXPORT / BUILD PIPELINE
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   13. TEXT ENGINE — GEOMETRY, COLOUR SAMPLING, FONT MATCHING
+   ==========================================================================
+   Everything below converts between three coordinate spaces:
+
+     PDF user space   origin bottom-left, units are points, y grows upward.
+                      This is what pdf-lib draws in and what we store.
+
+     Viewport space   origin top-left, units are CSS pixels of the rendered
+                      canvas, y grows downward. This is what the overlay uses.
+
+     Text matrix      each run carries its own matrix that already folds in
+                      the font size, so the font size has to be recovered
+                      from the matrix rather than read off a property.
+   ========================================================================== */
 
 /**
- * Groups an ordered list of page descriptors into contiguous runs that share
- * the same source. Copying a run in one call keeps the output file small.
+ * Derives every measurement we need from one pdf.js text item.
+ * The returned object mixes both spaces on purpose — the overlay needs the
+ * device numbers, the exporter needs the user-space numbers.
  */
+function deriveRunGeometry(textItem, viewport) {
+  const itemMatrix = textItem.transform;
+
+  /* User space: the baseline start point and the effective font size. */
+  const userFontSize = Math.hypot(itemMatrix[2], itemMatrix[3]) || Math.abs(itemMatrix[3]) || 10;
+  const userBaselineX = itemMatrix[4];
+  const userBaselineY = itemMatrix[5];
+  const userWidth = textItem.width || 0;
+
+  /* Viewport space: combine the item matrix with the viewport transform. */
+  const deviceMatrix = pdfjsLib.Util.transform(viewport.transform, itemMatrix);
+  const deviceAngleRadians = Math.atan2(deviceMatrix[1], deviceMatrix[0]);
+  const deviceFontHeight = Math.hypot(deviceMatrix[2], deviceMatrix[3]) || (userFontSize * viewport.scale);
+  const deviceWidth = userWidth * viewport.scale;
+
+  return {
+    text: textItem.str,
+    fontName: textItem.fontName,
+    hasLineBreak: textItem.hasEOL === true,
+
+    userFontSize: userFontSize,
+    userBaselineX: userBaselineX,
+    userBaselineY: userBaselineY,
+    userWidth: userWidth,
+
+    deviceBaselineX: deviceMatrix[4],
+    deviceBaselineY: deviceMatrix[5],
+    deviceWidth: deviceWidth,
+    deviceFontHeight: deviceFontHeight,
+    deviceAngleDegrees: deviceAngleRadians * 180 / Math.PI
+  };
+}
+
+/**
+ * The axis-aligned rectangle in VIEWPORT pixels that a run occupies, used for
+ * colour sampling and for hit-testing. Rotation is approximated by the bounding
+ * box, which is fine for sampling purposes.
+ */
+function computeRunDeviceRect(runGeometry) {
+  const ascentHeight = runGeometry.deviceFontHeight * COVER_ASCENT_FACTOR;
+  const descentHeight = runGeometry.deviceFontHeight * COVER_DESCENT_FACTOR;
+
+  return {
+    left: runGeometry.deviceBaselineX,
+    top: runGeometry.deviceBaselineY - ascentHeight,
+    width: Math.max(1, runGeometry.deviceWidth),
+    height: ascentHeight + descentHeight
+  };
+}
+
+/**
+ * Samples the paper colour immediately around a rectangle on the rendered
+ * canvas. Points are taken from a thin ring outside the rectangle, quantised
+ * into buckets, and the most common bucket wins — which beats averaging,
+ * because averaging a black-on-white line gives grey.
+ */
+function samplePaperColourAroundRect(canvasElement, deviceRect) {
+  const drawingContext = canvasElement.getContext('2d', { willReadFrequently: true });
+  const ringOffset = 3;
+  const samplePoints = [];
+
+  const leftEdge = deviceRect.left;
+  const rightEdge = deviceRect.left + deviceRect.width;
+  const topEdge = deviceRect.top;
+  const bottomEdge = deviceRect.top + deviceRect.height;
+
+  /* Points above and below, spread across the width. */
+  for (let fraction = 0; fraction <= 1.0001; fraction += 0.1) {
+    const acrossX = leftEdge + deviceRect.width * fraction;
+    samplePoints.push({ x: acrossX, y: topEdge - ringOffset });
+    samplePoints.push({ x: acrossX, y: bottomEdge + ringOffset });
+  }
+
+  /* Points to the left and right, spread across the height. */
+  for (let fraction = 0; fraction <= 1.0001; fraction += 0.25) {
+    const downY = topEdge + deviceRect.height * fraction;
+    samplePoints.push({ x: leftEdge - ringOffset, y: downY });
+    samplePoints.push({ x: rightEdge + ringOffset, y: downY });
+  }
+
+  const bucketCounts = new Map();
+
+  samplePoints.forEach(function (point) {
+    const pixelX = Math.round(clampNumber(point.x, 0, canvasElement.width - 1));
+    const pixelY = Math.round(clampNumber(point.y, 0, canvasElement.height - 1));
+
+    let pixelData;
+    try {
+      pixelData = drawingContext.getImageData(pixelX, pixelY, 1, 1).data;
+    } catch (readError) {
+      return;
+    }
+
+    /* Quantise to 16-level buckets so near-identical shades merge. */
+    const bucketKey = [
+      Math.round(pixelData[0] / 16),
+      Math.round(pixelData[1] / 16),
+      Math.round(pixelData[2] / 16)
+    ].join(',');
+
+    const existing = bucketCounts.get(bucketKey);
+    if (existing) {
+      existing.count += 1;
+      existing.redTotal += pixelData[0];
+      existing.greenTotal += pixelData[1];
+      existing.blueTotal += pixelData[2];
+    } else {
+      bucketCounts.set(bucketKey, {
+        count: 1,
+        redTotal: pixelData[0],
+        greenTotal: pixelData[1],
+        blueTotal: pixelData[2]
+      });
+    }
+  });
+
+  let winningBucket = null;
+  bucketCounts.forEach(function (bucket) {
+    if (!winningBucket || bucket.count > winningBucket.count) { winningBucket = bucket; }
+  });
+
+  if (!winningBucket) { return '#FFFFFF'; }
+
+  return rgbBytesToHex(
+    winningBucket.redTotal / winningBucket.count,
+    winningBucket.greenTotal / winningBucket.count,
+    winningBucket.blueTotal / winningBucket.count
+  );
+}
+
+/**
+ * Guesses the ink colour of a run by finding the darkest pixel inside it.
+ * Text is almost always darker than the paper behind it.
+ */
+function sampleInkColourInsideRect(canvasElement, deviceRect) {
+  const drawingContext = canvasElement.getContext('2d', { willReadFrequently: true });
+
+  const readLeft = Math.round(clampNumber(deviceRect.left, 0, canvasElement.width - 1));
+  const readTop = Math.round(clampNumber(deviceRect.top, 0, canvasElement.height - 1));
+  const readWidth = Math.round(clampNumber(deviceRect.width, 1, canvasElement.width - readLeft));
+  const readHeight = Math.round(clampNumber(deviceRect.height, 1, canvasElement.height - readTop));
+
+  let pixelBlock;
+  try {
+    pixelBlock = drawingContext.getImageData(readLeft, readTop, readWidth, readHeight).data;
+  } catch (readError) {
+    return '#1A1A1A';
+  }
+
+  let darkestLuminance = 255;
+  let darkestRed = 26;
+  let darkestGreen = 26;
+  let darkestBlue = 26;
+
+  for (let offset = 0; offset < pixelBlock.length; offset += 4) {
+    const redValue = pixelBlock[offset];
+    const greenValue = pixelBlock[offset + 1];
+    const blueValue = pixelBlock[offset + 2];
+    const luminance = 0.299 * redValue + 0.587 * greenValue + 0.114 * blueValue;
+
+    if (luminance < darkestLuminance) {
+      darkestLuminance = luminance;
+      darkestRed = redValue;
+      darkestGreen = greenValue;
+      darkestBlue = blueValue;
+    }
+  }
+
+  /* Anti-aliasing means the true ink colour is usually a touch darker than the
+     darkest sampled pixel on thin strokes, but this is close enough to look
+     right, and the user can override it. */
+  return rgbBytesToHex(darkestRed, darkestGreen, darkestBlue);
+}
+
+/**
+ * Picks the closest standard font to whatever the original run used.
+ * pdf.js exposes the real font through commonObjs once the page has rendered;
+ * the loadedName ("g_d0_f1") on the text item itself is not descriptive.
+ */
+function chooseStandardFontKey(pdfjsPage, loadedFontName) {
+  let descriptiveName = loadedFontName || '';
+  let flaggedBold = false;
+  let flaggedItalic = false;
+
+  try {
+    if (pdfjsPage && pdfjsPage.commonObjs && pdfjsPage.commonObjs.has(loadedFontName)) {
+      const fontObject = pdfjsPage.commonObjs.get(loadedFontName);
+      if (fontObject) {
+        descriptiveName = fontObject.name || descriptiveName;
+        flaggedBold = fontObject.black === true || fontObject.bold === true;
+        flaggedItalic = fontObject.italic === true;
+      }
+    }
+  } catch (lookupError) {
+    /* Font not resolved yet — fall back to name sniffing alone. */
+  }
+
+  const lowerName = String(descriptiveName).toLowerCase();
+
+  const looksBold = flaggedBold ||
+    /bold|black|heavy|semib|demib|extrab|ultrab|[-_]bd\b/.test(lowerName);
+  const looksItalic = flaggedItalic || /italic|oblique|[-_]it\b/.test(lowerName);
+  const looksMonospaced = /mono|courier|consol|menlo|typewriter/.test(lowerName);
+  const looksSerif = !/sans/.test(lowerName) &&
+    /times|serif|georgia|garamond|roman|minion|cambria|book|palatino|century schoolbook/.test(lowerName);
+
+  if (looksMonospaced) {
+    if (looksBold && looksItalic) { return 'CourierBoldOblique'; }
+    if (looksBold) { return 'CourierBold'; }
+    if (looksItalic) { return 'CourierOblique'; }
+    return 'Courier';
+  }
+
+  if (looksSerif) {
+    if (looksBold && looksItalic) { return 'TimesRomanBoldItalic'; }
+    if (looksBold) { return 'TimesRomanBold'; }
+    if (looksItalic) { return 'TimesRomanItalic'; }
+    return 'TimesRoman';
+  }
+
+  if (looksBold && looksItalic) { return 'HelveticaBoldOblique'; }
+  if (looksBold) { return 'HelveticaBold'; }
+  if (looksItalic) { return 'HelveticaOblique'; }
+  return 'Helvetica';
+}
+
+/** The CSS font stack that best previews a chosen standard font. */
+function cssFontStackForKey(fontKey) {
+  if (fontKey.indexOf('Times') === 0) { return 'Georgia, "Times New Roman", Times, serif'; }
+  if (fontKey.indexOf('Courier') === 0) { return '"Courier New", Courier, monospace'; }
+  return 'Helvetica, Arial, sans-serif';
+}
+
+function cssFontWeightForKey(fontKey) {
+  return /Bold/.test(fontKey) ? '700' : '400';
+}
+
+function cssFontStyleForKey(fontKey) {
+  return /(Oblique|Italic)/.test(fontKey) ? 'italic' : 'normal';
+}
+
+/**
+ * Builds a fresh replace-style edit from a set of picked runs. All geometry
+ * is captured in PDF user space so it survives zooming and re-rendering.
+ */
+function buildEditFromPickedRuns(runIndexes, canvasElement) {
+  const pickedRuns = runIndexes
+    .slice(0)
+    .sort(function (a, b) { return a - b; })
+    .map(function (runIndex) { return editorTextRuns[runIndex]; })
+    .filter(Boolean);
+
+  if (pickedRuns.length === 0) { return null; }
+
+  /* Union of the runs in user space. */
+  let minimumX = Infinity;
+  let maximumX = -Infinity;
+  let largestFontSize = 0;
+  let baselineY = pickedRuns[0].userBaselineY;
+  let combinedText = '';
+
+  pickedRuns.forEach(function (runGeometry, position) {
+    minimumX = Math.min(minimumX, runGeometry.userBaselineX);
+    maximumX = Math.max(maximumX, runGeometry.userBaselineX + runGeometry.userWidth);
+    largestFontSize = Math.max(largestFontSize, runGeometry.userFontSize);
+    baselineY = Math.min(baselineY, runGeometry.userBaselineY);
+
+    if (position > 0) {
+      const previousRun = pickedRuns[position - 1];
+      const gapBetweenRuns = runGeometry.userBaselineX -
+        (previousRun.userBaselineX + previousRun.userWidth);
+      /* Insert a space only when the runs are visually separated. */
+      if (gapBetweenRuns > previousRun.userFontSize * 0.18) { combinedText += ' '; }
+    }
+    combinedText += runGeometry.text;
+  });
+
+  /* Union of the runs in device space, for colour sampling. */
+  const deviceRects = pickedRuns.map(computeRunDeviceRect);
+  const unionRect = deviceRects.reduce(function (accumulated, rect) {
+    const left = Math.min(accumulated.left, rect.left);
+    const top = Math.min(accumulated.top, rect.top);
+    const right = Math.max(accumulated.left + accumulated.width, rect.left + rect.width);
+    const bottom = Math.max(accumulated.top + accumulated.height, rect.top + rect.height);
+    return { left: left, top: top, width: right - left, height: bottom - top };
+  }, deviceRects[0]);
+
+  const paperColour = samplePaperColourAroundRect(canvasElement, unionRect);
+  const inkColour = sampleInkColourInsideRect(canvasElement, unionRect);
+  const fontKey = chooseStandardFontKey(editorPdfPage, pickedRuns[0].fontName);
+
+  const coverPadding = 1;
+  const ascentHeight = largestFontSize * COVER_ASCENT_FACTOR;
+  const descentHeight = largestFontSize * COVER_DESCENT_FACTOR;
+
+  return {
+    editId: createUniqueId('edit'),
+    kind: 'replace',
+    sourceRunIndexes: runIndexes.slice(0).sort(function (a, b) { return a - b; }),
+    originalText: combinedText,
+    newText: combinedText,
+
+    baselineX: minimumX,
+    baselineY: baselineY,
+    boxWidth: Math.max(1, maximumX - minimumX),
+
+    coverX: minimumX - coverPadding,
+    coverY: baselineY - descentHeight - coverPadding,
+    coverWidth: Math.max(1, maximumX - minimumX) + coverPadding * 2,
+    coverHeight: ascentHeight + descentHeight + coverPadding * 2,
+    coverPadding: coverPadding,
+
+    fontKey: fontKey,
+    fontSize: Math.round(largestFontSize * 10) / 10,
+    textColorHex: inkColour,
+    coverColorHex: paperColour,
+
+    offsetX: 0,
+    offsetY: 0,
+    alignment: 'left',
+    shrinkToFit: true,
+    drawCover: true
+  };
+}
+
+/** Recomputes the cover rectangle after the user changes size or padding. */
+function recomputeCoverRectangle(editOperation) {
+  const ascentHeight = editOperation.fontSize * COVER_ASCENT_FACTOR;
+  const descentHeight = editOperation.fontSize * COVER_DESCENT_FACTOR;
+  const padding = editOperation.coverPadding;
+
+  if (editOperation.kind === 'whiteout') { return; }
+
+  editOperation.coverX = editOperation.baselineX - padding;
+  editOperation.coverY = editOperation.baselineY - descentHeight - padding;
+  editOperation.coverWidth = editOperation.boxWidth + padding * 2;
+  editOperation.coverHeight = ascentHeight + descentHeight + padding * 2;
+}
+
+/* ==========================================================================
+   14. TEXT MODE — PAGE RENDERING AND THE INTERACTIVE OVERLAY
+   ========================================================================== */
+
+/* The pdf.js page object backing the editor canvas right now. */
+let editorPdfPage = null;
+
+/** Reads (and caches) the text content of one working-document page. */
+async function loadTextContentForPage(pageEntry) {
+  if (pageEntry.isBlank || !pageEntry.sourceId) { return { items: [] }; }
+
+  const cacheKey = pageEntry.sourceId + '::' + pageEntry.sourcePageIndex;
+  if (pageTextContentCache.has(cacheKey)) { return pageTextContentCache.get(cacheKey); }
+
+  const sourceRecord = sourceLibrary.get(pageEntry.sourceId);
+  if (!sourceRecord) { return { items: [] }; }
+
+  const pdfjsPage = await sourceRecord.pdfjsDocument.getPage(pageEntry.sourcePageIndex + 1);
+  const textContent = await pdfjsPage.getTextContent();
+
+  /* Runs made only of whitespace are noise for an editor — drop them. */
+  const meaningfulItems = textContent.items.filter(function (textItem) {
+    return textItem.str && textItem.str.trim().length > 0;
+  });
+
+  const cachedEntry = { items: meaningfulItems };
+  pageTextContentCache.set(cacheKey, cachedEntry);
+  return cachedEntry;
+}
+
+/** Opens a page in the text editor: renders it, then builds the overlay. */
+async function openEditorPage(pageIndex) {
+  if (pageList.length === 0) { return; }
+
+  editorPageIndex = clampNumber(pageIndex, 0, pageList.length - 1);
+  const pageEntry = pageList[editorPageIndex];
+  const currentToken = ++editorRenderToken;
+
+  pickedRunIndexes = [];
+  pickedEditId = null;
+
+  getElement('editorPageInput').value = String(editorPageIndex + 1);
+  getElement('editorPageTotal').textContent = 'of ' + pageList.length;
+
+  const canvasElement = getElement('editorCanvas');
+  const drawingContext = canvasElement.getContext('2d', { willReadFrequently: true });
+  const overlayElement = getElement('textOverlay');
+  overlayElement.innerHTML = '';
+
+  const zoomPercentage = parseInt(getElement('editorZoomSlider').value, 10) || 120;
+
+  /* --- Blank pages have nothing to render or edit --- */
+  if (pageEntry.isBlank || !pageEntry.sourceId) {
+    editorPdfPage = null;
+    editorTextRuns = [];
+    editorViewport = null;
+
+    canvasElement.width = Math.floor(pageEntry.pointWidth * zoomPercentage / 100);
+    canvasElement.height = Math.floor(pageEntry.pointHeight * zoomPercentage / 100);
+    canvasElement.style.width = canvasElement.width + 'px';
+    canvasElement.style.height = canvasElement.height + 'px';
+    drawingContext.fillStyle = '#FFFFFF';
+    drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+    getElement('canvasHint').textContent =
+      'This is a blank page — there is no text on it to edit.';
+    renderInspector();
+    renderPageEditList();
+    return;
+  }
+
+  const sourceRecord = sourceLibrary.get(pageEntry.sourceId);
+  const pdfjsPage = await sourceRecord.pdfjsDocument.getPage(pageEntry.sourcePageIndex + 1);
+  if (currentToken !== editorRenderToken) { return; }
+
+  editorPdfPage = pdfjsPage;
+
+  const totalRotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+  const viewport = pdfjsPage.getViewport({ scale: zoomPercentage / 100, rotation: totalRotation });
+  editorViewport = viewport;
+
+  canvasElement.width = Math.floor(viewport.width);
+  canvasElement.height = Math.floor(viewport.height);
+  canvasElement.style.width = canvasElement.width + 'px';
+  canvasElement.style.height = canvasElement.height + 'px';
+
+  drawingContext.fillStyle = '#FFFFFF';
+  drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
+  await pdfjsPage.render({ canvasContext: drawingContext, viewport: viewport }).promise;
+  if (currentToken !== editorRenderToken) { return; }
+
+  /* --- Build the run geometry table for this page --- */
+  const textContent = await loadTextContentForPage(pageEntry);
+  if (currentToken !== editorRenderToken) { return; }
+
+  editorTextRuns = textContent.items.map(function (textItem) {
+    return deriveRunGeometry(textItem, viewport);
+  });
+
+  if (editorTextRuns.length === 0) {
+    getElement('canvasHint').textContent =
+      'No text objects were found on this page. It is most likely a scan — an image of ' +
+      'words rather than words. Use the Add text and Whiteout tools to lay new text over it.';
+  } else {
+    getElement('canvasHint').textContent =
+      'Click any line of text to rewrite it. Shift-click a second run on the same line to ' +
+      'edit them together. The original is covered with the sampled paper colour, then the ' +
+      'new words are drawn at the same baseline.';
+  }
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+}
+
+/** Converts a user-space rectangle into an overlay rectangle in pixels. */
+function userRectToDeviceRect(userX, userY, userWidth, userHeight) {
+  if (!editorViewport) { return { left: 0, top: 0, width: 0, height: 0 }; }
+
+  const firstCorner = editorViewport.convertToViewportPoint(userX, userY);
+  const secondCorner = editorViewport.convertToViewportPoint(userX + userWidth, userY + userHeight);
+
+  const left = Math.min(firstCorner[0], secondCorner[0]);
+  const top = Math.min(firstCorner[1], secondCorner[1]);
+  const width = Math.abs(secondCorner[0] - firstCorner[0]);
+  const height = Math.abs(secondCorner[1] - firstCorner[1]);
+
+  return { left: left, top: top, width: width, height: height };
+}
+
+/** Rebuilds every interactive box sitting on top of the rendered page. */
+function buildTextOverlay() {
+  const overlayElement = getElement('textOverlay');
+  overlayElement.innerHTML = '';
+  overlayElement.classList.toggle('show-runs', showRunOutlines);
+
+  if (pageList.length === 0 || !editorViewport) { return; }
+
+  const pageEntry = pageList[editorPageIndex];
+  const pageEdits = getEditsForPage(pageEntry.uniqueId);
+
+  /* Map every run index that already carries a replacement, so the overlay can
+     draw a live preview of the change instead of the original pixels. */
+  const editByRunIndex = new Map();
+  pageEdits.forEach(function (editOperation) {
+    if (editOperation.kind !== 'replace') { return; }
+    editOperation.sourceRunIndexes.forEach(function (runIndex) {
+      editByRunIndex.set(runIndex, editOperation);
+    });
+  });
+
+  /* --- One box per text run --- */
+  editorTextRuns.forEach(function (runGeometry, runIndex) {
+    const runElement = document.createElement('div');
+    runElement.className = 'text-run';
+    runElement.setAttribute('data-run-index', String(runIndex));
+    runElement.title = runGeometry.text;
+
+    runElement.style.left = runGeometry.deviceBaselineX + 'px';
+    runElement.style.top = runGeometry.deviceBaselineY + 'px';
+    runElement.style.width = Math.max(4, runGeometry.deviceWidth) + 'px';
+    runElement.style.height = runGeometry.deviceFontHeight * 1.12 + 'px';
+    runElement.style.transform =
+      'rotate(' + runGeometry.deviceAngleDegrees + 'deg) translateY(-100%)';
+
+    if (pickedRunIndexes.indexOf(runIndex) !== -1) { runElement.classList.add('is-picked'); }
+
+    const attachedEdit = editByRunIndex.get(runIndex);
+    if (attachedEdit) {
+      runElement.classList.add('is-edited');
+      runElement.setAttribute('data-edit-id', attachedEdit.editId);
+
+      /* Only the first run of a multi-run edit paints the preview text, so a
+         two-run edit does not print its replacement twice. */
+      if (attachedEdit.sourceRunIndexes[0] === runIndex) {
+        const previewRect = userRectToDeviceRect(
+          attachedEdit.coverX, attachedEdit.coverY,
+          attachedEdit.coverWidth, attachedEdit.coverHeight
+        );
+
+        const previewElement = document.createElement('div');
+        previewElement.className = 'overlay-object';
+        previewElement.style.left = previewRect.left + 'px';
+        previewElement.style.top = previewRect.top + 'px';
+        previewElement.style.width = previewRect.width + 'px';
+        previewElement.style.height = previewRect.height + 'px';
+        previewElement.style.border = '1px solid rgba(129,199,132,0.9)';
+        previewElement.style.background = attachedEdit.drawCover
+          ? attachedEdit.coverColorHex
+          : 'transparent';
+        previewElement.style.display = 'flex';
+        previewElement.style.alignItems = 'flex-end';
+        previewElement.style.justifyContent =
+          attachedEdit.alignment === 'center' ? 'center'
+            : (attachedEdit.alignment === 'right' ? 'flex-end' : 'flex-start');
+        previewElement.style.overflow = 'hidden';
+        previewElement.setAttribute('data-edit-id', attachedEdit.editId);
+
+        const previewText = document.createElement('span');
+        previewText.textContent = attachedEdit.newText;
+        previewText.style.fontFamily = cssFontStackForKey(attachedEdit.fontKey);
+        previewText.style.fontWeight = cssFontWeightForKey(attachedEdit.fontKey);
+        previewText.style.fontStyle = cssFontStyleForKey(attachedEdit.fontKey);
+        previewText.style.fontSize = (attachedEdit.fontSize * editorViewport.scale) + 'px';
+        previewText.style.color = attachedEdit.textColorHex;
+        previewText.style.lineHeight = '1.05';
+        previewText.style.whiteSpace = 'pre';
+        previewText.style.pointerEvents = 'none';
+        previewElement.appendChild(previewText);
+
+        overlayElement.appendChild(previewElement);
+      }
+    }
+
+    overlayElement.appendChild(runElement);
+  });
+
+  /* --- Standalone inserted text and whiteout rectangles --- */
+  pageEdits.forEach(function (editOperation) {
+    if (editOperation.kind === 'replace') { return; }
+
+    const objectRect = userRectToDeviceRect(
+      editOperation.coverX, editOperation.coverY,
+      editOperation.coverWidth, editOperation.coverHeight
+    );
+
+    const objectElement = document.createElement('div');
+    objectElement.className = 'overlay-object' +
+      (editOperation.kind === 'whiteout' ? ' is-whiteout' : '');
+    objectElement.setAttribute('data-edit-id', editOperation.editId);
+    objectElement.style.left = objectRect.left + 'px';
+    objectElement.style.top = objectRect.top + 'px';
+    objectElement.style.width = Math.max(6, objectRect.width) + 'px';
+    objectElement.style.height = Math.max(6, objectRect.height) + 'px';
+
+    if (editOperation.drawCover) {
+      objectElement.style.background = editOperation.coverColorHex;
+    }
+
+    if (editOperation.editId === pickedEditId) { objectElement.classList.add('is-picked'); }
+
+    const labelElement = document.createElement('span');
+    labelElement.className = 'overlay-object-label';
+    labelElement.textContent = editOperation.kind === 'whiteout' ? 'Whiteout' : 'Text box';
+    objectElement.appendChild(labelElement);
+
+    if (editOperation.kind === 'insert') {
+      const insertedText = document.createElement('span');
+      insertedText.textContent = editOperation.newText;
+      insertedText.style.position = 'absolute';
+      insertedText.style.left = '0';
+      insertedText.style.bottom = (editOperation.fontSize * COVER_DESCENT_FACTOR *
+        editorViewport.scale) + 'px';
+      insertedText.style.fontFamily = cssFontStackForKey(editOperation.fontKey);
+      insertedText.style.fontWeight = cssFontWeightForKey(editOperation.fontKey);
+      insertedText.style.fontStyle = cssFontStyleForKey(editOperation.fontKey);
+      insertedText.style.fontSize = (editOperation.fontSize * editorViewport.scale) + 'px';
+      insertedText.style.color = editOperation.textColorHex;
+      insertedText.style.lineHeight = '1.05';
+      insertedText.style.whiteSpace = 'pre';
+      insertedText.style.pointerEvents = 'none';
+      objectElement.appendChild(insertedText);
+    }
+
+    overlayElement.appendChild(objectElement);
+  });
+}
+
+/** Click routing inside the overlay, which depends on the active tool. */
+function handleOverlayClick(clickEvent) {
+  if (!editorViewport) { return; }
+
+  const editObjectElement = clickEvent.target.closest('[data-edit-id]');
+  const runElement = clickEvent.target.closest('.text-run');
+
+  /* Clicking an existing edit always opens it, whatever tool is active. */
+  if (editObjectElement) {
+    pickedEditId = editObjectElement.getAttribute('data-edit-id');
+    const pageEdits = getEditsForPage(pageList[editorPageIndex].uniqueId);
+    const openedEdit = pageEdits.find(function (candidate) {
+      return candidate.editId === pickedEditId;
+    });
+    pickedRunIndexes = openedEdit && openedEdit.kind === 'replace'
+      ? openedEdit.sourceRunIndexes.slice(0)
+      : [];
+    buildTextOverlay();
+    renderInspector();
+    return;
+  }
+
+  /* A whiteout drag ends with a click event on bare paper; without this guard
+     that trailing click would immediately deselect the rectangle just drawn. */
+  if (activeTextTool === 'whiteout') { return; }
+
+  if (activeTextTool === 'insert') {
+    createInsertedTextBoxAtEvent(clickEvent);
+    return;
+  }
+
+  if (activeTextTool === 'select' && runElement) {
+    const runIndex = parseInt(runElement.getAttribute('data-run-index'), 10);
+    pickedEditId = null;
+
+    if (clickEvent.shiftKey && pickedRunIndexes.length > 0) {
+      const anchorIndex = pickedRunIndexes[0];
+      const startIndex = Math.min(anchorIndex, runIndex);
+      const endIndex = Math.max(anchorIndex, runIndex);
+      pickedRunIndexes = [];
+      for (let index = startIndex; index <= endIndex; index += 1) {
+        pickedRunIndexes.push(index);
+      }
+    } else {
+      pickedRunIndexes = [runIndex];
+    }
+
+    buildTextOverlay();
+    renderInspector();
+    return;
+  }
+
+  /* Clicking bare paper clears the pick. */
+  if (!runElement) {
+    pickedRunIndexes = [];
+    pickedEditId = null;
+    buildTextOverlay();
+    renderInspector();
+  }
+}
+
+/** Places a brand new text box wherever the user clicked. */
+function createInsertedTextBoxAtEvent(clickEvent) {
+  const overlayBounds = getElement('textOverlay').getBoundingClientRect();
+  const deviceX = clickEvent.clientX - overlayBounds.left;
+  const deviceY = clickEvent.clientY - overlayBounds.top;
+  const userPoint = editorViewport.convertToPdfPoint(deviceX, deviceY);
+
+  const defaultFontSize = 11;
+  const canvasElement = getElement('editorCanvas');
+  const paperColour = samplePaperColourAroundRect(canvasElement, {
+    left: deviceX, top: deviceY - 6, width: 40, height: 12
+  });
+
+  const newEdit = {
+    editId: createUniqueId('edit'),
+    kind: 'insert',
+    sourceRunIndexes: [],
+    originalText: '',
+    newText: 'New text',
+
+    baselineX: userPoint[0],
+    baselineY: userPoint[1],
+    boxWidth: defaultFontSize * 6,
+
+    coverX: userPoint[0] - 1,
+    coverY: userPoint[1] - defaultFontSize * COVER_DESCENT_FACTOR - 1,
+    coverWidth: defaultFontSize * 6,
+    coverHeight: defaultFontSize * (COVER_ASCENT_FACTOR + COVER_DESCENT_FACTOR) + 2,
+    coverPadding: 1,
+
+    fontKey: 'Helvetica',
+    fontSize: defaultFontSize,
+    textColorHex: '#1A1A1A',
+    coverColorHex: paperColour,
+
+    offsetX: 0,
+    offsetY: 0,
+    alignment: 'left',
+    shrinkToFit: false,
+    drawCover: false
+  };
+
+  pushHistorySnapshot();
+  const pageUniqueId = pageList[editorPageIndex].uniqueId;
+  setEditsForPage(pageUniqueId, getEditsForPage(pageUniqueId).concat([newEdit]));
+
+  pickedEditId = newEdit.editId;
+  pickedRunIndexes = [];
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+  renderPageGrid();
+  updateStatusBar();
+
+  getElement('replacementInput').focus();
+  getElement('replacementInput').select();
+}
+
+/* --- Whiteout marquee -------------------------------------------------- */
+
+function handleOverlayPointerDown(pointerEvent) {
+  if (activeTextTool !== 'whiteout' || !editorViewport) { return; }
+  if (pointerEvent.button !== 0) { return; }
+
+  pointerEvent.preventDefault();
+
+  const overlayBounds = getElement('textOverlay').getBoundingClientRect();
+  marqueeStartPoint = {
+    x: pointerEvent.clientX - overlayBounds.left,
+    y: pointerEvent.clientY - overlayBounds.top
+  };
+
+  marqueeElement = document.createElement('div');
+  marqueeElement.className = 'marquee-box';
+  marqueeElement.style.left = marqueeStartPoint.x + 'px';
+  marqueeElement.style.top = marqueeStartPoint.y + 'px';
+  marqueeElement.style.width = '0px';
+  marqueeElement.style.height = '0px';
+  getElement('textOverlay').appendChild(marqueeElement);
+
+  window.addEventListener('mousemove', handleMarqueeMove);
+  window.addEventListener('mouseup', handleMarqueeRelease);
+}
+
+function handleMarqueeMove(pointerEvent) {
+  if (!marqueeElement || !marqueeStartPoint) { return; }
+
+  const overlayBounds = getElement('textOverlay').getBoundingClientRect();
+  const currentX = pointerEvent.clientX - overlayBounds.left;
+  const currentY = pointerEvent.clientY - overlayBounds.top;
+
+  const left = Math.min(marqueeStartPoint.x, currentX);
+  const top = Math.min(marqueeStartPoint.y, currentY);
+
+  marqueeElement.style.left = left + 'px';
+  marqueeElement.style.top = top + 'px';
+  marqueeElement.style.width = Math.abs(currentX - marqueeStartPoint.x) + 'px';
+  marqueeElement.style.height = Math.abs(currentY - marqueeStartPoint.y) + 'px';
+}
+
+function handleMarqueeRelease(pointerEvent) {
+  window.removeEventListener('mousemove', handleMarqueeMove);
+  window.removeEventListener('mouseup', handleMarqueeRelease);
+
+  if (!marqueeElement || !marqueeStartPoint) { return; }
+
+  const overlayBounds = getElement('textOverlay').getBoundingClientRect();
+  const endX = pointerEvent.clientX - overlayBounds.left;
+  const endY = pointerEvent.clientY - overlayBounds.top;
+
+  const deviceLeft = Math.min(marqueeStartPoint.x, endX);
+  const deviceTop = Math.min(marqueeStartPoint.y, endY);
+  const deviceWidth = Math.abs(endX - marqueeStartPoint.x);
+  const deviceHeight = Math.abs(endY - marqueeStartPoint.y);
+
+  if (marqueeElement.parentNode) { marqueeElement.parentNode.removeChild(marqueeElement); }
+  marqueeElement = null;
+  marqueeStartPoint = null;
+
+  /* Ignore accidental clicks that produced a sliver. */
+  if (deviceWidth < 6 || deviceHeight < 6) { return; }
+
+  const topLeftUser = editorViewport.convertToPdfPoint(deviceLeft, deviceTop);
+  const bottomRightUser = editorViewport.convertToPdfPoint(
+    deviceLeft + deviceWidth, deviceTop + deviceHeight
+  );
+
+  const userX = Math.min(topLeftUser[0], bottomRightUser[0]);
+  const userY = Math.min(topLeftUser[1], bottomRightUser[1]);
+  const userWidth = Math.abs(bottomRightUser[0] - topLeftUser[0]);
+  const userHeight = Math.abs(bottomRightUser[1] - topLeftUser[1]);
+
+  const paperColour = samplePaperColourAroundRect(getElement('editorCanvas'), {
+    left: deviceLeft, top: deviceTop, width: deviceWidth, height: deviceHeight
+  });
+
+  const whiteoutEdit = {
+    editId: createUniqueId('edit'),
+    kind: 'whiteout',
+    sourceRunIndexes: [],
+    originalText: '',
+    newText: '',
+
+    baselineX: userX,
+    baselineY: userY,
+    boxWidth: userWidth,
+
+    coverX: userX,
+    coverY: userY,
+    coverWidth: userWidth,
+    coverHeight: userHeight,
+    coverPadding: 0,
+
+    fontKey: 'Helvetica',
+    fontSize: 11,
+    textColorHex: '#1A1A1A',
+    coverColorHex: paperColour,
+
+    offsetX: 0,
+    offsetY: 0,
+    alignment: 'left',
+    shrinkToFit: false,
+    drawCover: true
+  };
+
+  pushHistorySnapshot();
+  const pageUniqueId = pageList[editorPageIndex].uniqueId;
+  setEditsForPage(pageUniqueId, getEditsForPage(pageUniqueId).concat([whiteoutEdit]));
+
+  pickedEditId = whiteoutEdit.editId;
+  pickedRunIndexes = [];
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+  renderPageGrid();
+  updateStatusBar();
+  showToast('Whiteout rectangle added.');
+}
+
+/* ==========================================================================
+   15. TEXT MODE — THE INSPECTOR PANEL
+   ========================================================================== */
+
+/** Returns the edit currently open in the inspector, if there is one. */
+function getOpenEdit() {
+  if (!pickedEditId || pageList.length === 0) { return null; }
+  const pageEdits = getEditsForPage(pageList[editorPageIndex].uniqueId);
+  return pageEdits.find(function (candidate) { return candidate.editId === pickedEditId; }) || null;
+}
+
+/**
+ * Works out what the inspector should currently be showing: an existing edit,
+ * a draft built from the picked runs, or nothing at all.
+ */
+function resolveInspectorSubject() {
+  const openEdit = getOpenEdit();
+  if (openEdit) { return { edit: openEdit, isExisting: true }; }
+
+  if (pickedRunIndexes.length > 0) {
+    /* If the picked runs already belong to an edit, open that instead. */
+    const pageEdits = getEditsForPage(pageList[editorPageIndex].uniqueId);
+    const matchingEdit = pageEdits.find(function (candidate) {
+      return candidate.kind === 'replace' &&
+        candidate.sourceRunIndexes.some(function (runIndex) {
+          return pickedRunIndexes.indexOf(runIndex) !== -1;
+        });
+    });
+
+    if (matchingEdit) { return { edit: matchingEdit, isExisting: true }; }
+
+    const draftEdit = buildEditFromPickedRuns(pickedRunIndexes, getElement('editorCanvas'));
+    if (draftEdit) { return { edit: draftEdit, isExisting: false }; }
+  }
+
+  return null;
+}
+
+/* The draft currently displayed, so Apply knows what to commit. */
+let inspectorDraftEdit = null;
+
+function renderInspector() {
+  const subject = resolveInspectorSubject();
+  const inspectorEditor = getElement('inspectorEditor');
+  const inspectorEmpty = getElement('inspectorEmpty');
+  const deselectButton = getElement('deselectObjectButton');
+
+  if (!subject) {
+    inspectorDraftEdit = null;
+    inspectorEditor.style.display = 'none';
+    inspectorEmpty.style.display = 'block';
+    deselectButton.style.display = 'none';
+    getElement('inspectorHeading').textContent = 'Nothing picked';
+    return;
+  }
+
+  inspectorDraftEdit = subject.edit;
+  inspectorEditor.style.display = 'block';
+  inspectorEmpty.style.display = 'none';
+  deselectButton.style.display = 'inline-flex';
+
+  const headingByKind = {
+    replace: subject.isExisting ? 'Editing this line' : 'Rewrite this line',
+    insert: 'New text box',
+    whiteout: 'Whiteout rectangle'
+  };
+  getElement('inspectorHeading').textContent = headingByKind[subject.edit.kind] || 'Edit';
+
+  const originalPreview = getElement('originalTextPreview');
+  if (subject.edit.kind === 'replace') {
+    originalPreview.style.display = 'block';
+    originalPreview.textContent = 'Original: ' + subject.edit.originalText;
+  } else if (subject.edit.kind === 'whiteout') {
+    originalPreview.style.display = 'block';
+    originalPreview.textContent =
+      'This rectangle paints over whatever sits beneath it. Give it text below if you want ' +
+      'something drawn on top.';
+  } else {
+    originalPreview.style.display = 'none';
+  }
+
+  getElement('replacementInput').value = subject.edit.newText;
+  getElement('replacementInput').disabled = false;
+  getElement('editFontSelect').value = subject.edit.fontKey;
+  getElement('editFontSizeInput').value = String(subject.edit.fontSize);
+  getElement('editTextColorInput').value = subject.edit.textColorHex;
+  getElement('editCoverColorInput').value = subject.edit.coverColorHex;
+  getElement('editOffsetXInput').value = String(subject.edit.offsetX);
+  getElement('editOffsetYInput').value = String(subject.edit.offsetY);
+  getElement('editCoverPaddingInput').value = String(subject.edit.coverPadding);
+  getElement('editAlignSelect').value = subject.edit.alignment;
+  getElement('editShrinkToFitInput').checked = subject.edit.shrinkToFit === true;
+  getElement('editDrawCoverInput').checked = subject.edit.drawCover === true;
+
+  getElement('removeEditButton').style.display = subject.isExisting ? 'inline-flex' : 'none';
+  getElement('applyEditButton').textContent = subject.isExisting ? 'Update' : 'Apply';
+}
+
+/** Pulls every inspector field back into the edit object. */
+function readInspectorFieldsInto(editOperation) {
+  editOperation.newText = getElement('replacementInput').value;
+  editOperation.fontKey = getElement('editFontSelect').value;
+  editOperation.fontSize = parseFloat(getElement('editFontSizeInput').value) || 11;
+  editOperation.textColorHex = getElement('editTextColorInput').value;
+  editOperation.coverColorHex = getElement('editCoverColorInput').value;
+  editOperation.offsetX = parseFloat(getElement('editOffsetXInput').value) || 0;
+  editOperation.offsetY = parseFloat(getElement('editOffsetYInput').value) || 0;
+  editOperation.coverPadding = parseFloat(getElement('editCoverPaddingInput').value) || 0;
+  editOperation.alignment = getElement('editAlignSelect').value;
+  editOperation.shrinkToFit = getElement('editShrinkToFitInput').checked;
+  editOperation.drawCover = getElement('editDrawCoverInput').checked;
+}
+
+function applyInspectorEdit() {
+  if (!inspectorDraftEdit || pageList.length === 0) { return; }
+
+  const pageUniqueId = pageList[editorPageIndex].uniqueId;
+  const pageEdits = getEditsForPage(pageUniqueId);
+  const existingIndex = pageEdits.findIndex(function (candidate) {
+    return candidate.editId === inspectorDraftEdit.editId;
+  });
+
+  pushHistorySnapshot();
+  readInspectorFieldsInto(inspectorDraftEdit);
+  recomputeCoverRectangle(inspectorDraftEdit);
+
+  if (existingIndex === -1) {
+    setEditsForPage(pageUniqueId, pageEdits.concat([inspectorDraftEdit]));
+    showToast('Edit applied.', 'success');
+  } else {
+    const updatedEdits = pageEdits.slice(0);
+    updatedEdits[existingIndex] = inspectorDraftEdit;
+    setEditsForPage(pageUniqueId, updatedEdits);
+    showToast('Edit updated.', 'success');
+  }
+
+  pickedEditId = inspectorDraftEdit.editId;
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+  renderPageGrid();
+  updateStatusBar();
+}
+
+function removeEdit(editId) {
+  if (pageList.length === 0) { return; }
+
+  const pageUniqueId = pageList[editorPageIndex].uniqueId;
+  const remainingEdits = getEditsForPage(pageUniqueId).filter(function (candidate) {
+    return candidate.editId !== editId;
+  });
+
+  pushHistorySnapshot();
+  setEditsForPage(pageUniqueId, remainingEdits);
+
+  if (pickedEditId === editId) {
+    pickedEditId = null;
+    pickedRunIndexes = [];
+  }
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+  renderPageGrid();
+  updateStatusBar();
+  showToast('Edit removed.');
+}
+
+function clearEditsOnCurrentPage() {
+  if (pageList.length === 0) { return; }
+
+  const pageUniqueId = pageList[editorPageIndex].uniqueId;
+  if (getEditsForPage(pageUniqueId).length === 0) {
+    showToast('There are no edits on this page.', 'error');
+    return;
+  }
+
+  if (!window.confirm('Remove every text edit on this page?')) { return; }
+
+  pushHistorySnapshot();
+  setEditsForPage(pageUniqueId, []);
+  pickedEditId = null;
+  pickedRunIndexes = [];
+
+  buildTextOverlay();
+  renderInspector();
+  renderPageEditList();
+  renderPageGrid();
+  updateStatusBar();
+  showToast('Page edits cleared.');
+}
+
+function renderPageEditList() {
+  const editList = getElement('editList');
+  const emptyLabel = getElement('editListEmpty');
+  editList.innerHTML = '';
+
+  if (pageList.length === 0) { return; }
+
+  const pageEdits = getEditsForPage(pageList[editorPageIndex].uniqueId);
+  getElement('pageEditCountLabel').textContent = String(pageEdits.length);
+
+  if (pageEdits.length === 0) {
+    emptyLabel.style.display = 'block';
+    return;
+  }
+
+  emptyLabel.style.display = 'none';
+
+  pageEdits.forEach(function (editOperation) {
+    const rowElement = document.createElement('div');
+    rowElement.className = 'edit-list-row';
+
+    const kindDot = document.createElement('span');
+    kindDot.className = 'edit-kind-dot' +
+      (editOperation.kind === 'insert' ? ' is-insert' : '') +
+      (editOperation.kind === 'whiteout' ? ' is-whiteout' : '');
+    rowElement.appendChild(kindDot);
+
+    const textLabel = document.createElement('span');
+    textLabel.className = 'edit-row-text';
+    textLabel.textContent = editOperation.kind === 'whiteout'
+      ? 'Whiteout rectangle'
+      : (editOperation.newText || '(empty)');
+    rowElement.appendChild(textLabel);
+
+    const removeButton = document.createElement('button');
+    removeButton.className = 'edit-row-remove';
+    removeButton.textContent = '×';
+    removeButton.title = 'Remove this edit';
+    removeButton.addEventListener('click', function (clickEvent) {
+      clickEvent.stopPropagation();
+      removeEdit(editOperation.editId);
+    });
+    rowElement.appendChild(removeButton);
+
+    rowElement.addEventListener('click', function () {
+      pickedEditId = editOperation.editId;
+      pickedRunIndexes = editOperation.kind === 'replace'
+        ? editOperation.sourceRunIndexes.slice(0)
+        : [];
+      buildTextOverlay();
+      renderInspector();
+    });
+
+    editList.appendChild(rowElement);
+  });
+}
+
+function setActiveTextTool(toolName) {
+  activeTextTool = toolName;
+
+  [
+    { id: 'toolSelectButton', name: 'select' },
+    { id: 'toolInsertButton', name: 'insert' },
+    { id: 'toolWhiteoutButton', name: 'whiteout' }
+  ].forEach(function (definition) {
+    getElement(definition.id).classList.toggle('is-tool-active', definition.name === toolName);
+  });
+
+  const overlayElement = getElement('textOverlay');
+  overlayElement.style.cursor = toolName === 'whiteout' ? 'crosshair'
+    : (toolName === 'insert' ? 'copy' : 'default');
+
+  const hintByTool = {
+    select: 'Click any line of text to rewrite it. Shift-click a second run on the same line ' +
+            'to edit them together.',
+    insert: 'Click anywhere on the page to drop in a new line of text.',
+    whiteout: 'Drag out a rectangle to paint over anything on the page.'
+  };
+  getElement('canvasHint').textContent = hintByTool[toolName];
+}
+
+/** Copies every word on the current page to the system clipboard. */
+async function copyCurrentPageText() {
+  if (editorTextRuns.length === 0) {
+    showToast('There is no extractable text on this page.', 'error');
+    return;
+  }
+
+  /* Group runs into lines by their baseline, then join with newlines. */
+  const lineBuckets = new Map();
+  editorTextRuns.forEach(function (runGeometry) {
+    const bucketKey = Math.round(runGeometry.userBaselineY);
+    if (!lineBuckets.has(bucketKey)) { lineBuckets.set(bucketKey, []); }
+    lineBuckets.get(bucketKey).push(runGeometry);
+  });
+
+  const sortedKeys = Array.from(lineBuckets.keys()).sort(function (a, b) { return b - a; });
+  const assembledLines = sortedKeys.map(function (bucketKey) {
+    return lineBuckets.get(bucketKey)
+      .sort(function (a, b) { return a.userBaselineX - b.userBaselineX; })
+      .map(function (runGeometry) { return runGeometry.text; })
+      .join(' ');
+  });
+
+  const pageText = assembledLines.join('\n');
+
+  try {
+    await navigator.clipboard.writeText(pageText);
+    showToast('Page text copied to the clipboard.', 'success');
+  } catch (clipboardError) {
+    console.error(clipboardError);
+    showToast('The browser blocked clipboard access.', 'error');
+  }
+}
+
+/* ==========================================================================
+   16. TEXT MODE — FIND AND REPLACE ACROSS THE DOCUMENT
+   ========================================================================== */
+
+/** Escapes a user-typed string so it can sit safely inside a RegExp. */
+function escapeForRegularExpression(rawText) {
+  return String(rawText).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildSearchRegularExpression(searchTerm, matchCase, wholeWordsOnly) {
+  const escapedTerm = escapeForRegularExpression(searchTerm);
+  const pattern = wholeWordsOnly ? '\\b' + escapedTerm + '\\b' : escapedTerm;
+  return new RegExp(pattern, matchCase ? 'g' : 'gi');
+}
+
+/**
+ * Renders a page offscreen purely so colours can be sampled from it. Used by
+ * find-and-replace, which has to build edits for pages the user is not
+ * currently looking at.
+ */
+async function renderPageForSampling(pageEntry, samplingScale) {
+  const sourceRecord = sourceLibrary.get(pageEntry.sourceId);
+  if (!sourceRecord) { return null; }
+
+  const pdfjsPage = await sourceRecord.pdfjsDocument.getPage(pageEntry.sourcePageIndex + 1);
+  const viewport = pdfjsPage.getViewport({ scale: samplingScale, rotation: 0 });
+
+  const offscreenCanvas = document.createElement('canvas');
+  offscreenCanvas.width = Math.max(1, Math.floor(viewport.width));
+  offscreenCanvas.height = Math.max(1, Math.floor(viewport.height));
+
+  const drawingContext = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+  drawingContext.fillStyle = '#FFFFFF';
+  drawingContext.fillRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+
+  await pdfjsPage.render({ canvasContext: drawingContext, viewport: viewport }).promise;
+
+  return { canvas: offscreenCanvas, viewport: viewport, pdfjsPage: pdfjsPage };
+}
+
+/**
+ * Walks every page looking for runs that contain the search term. Nothing is
+ * changed yet — this only reports what would be replaced.
+ */
+async function scanDocumentForMatches() {
+  const searchTerm = getElement('findTermInput').value;
+  if (searchTerm.length === 0) {
+    showToast('Type something to search for.', 'error');
+    return;
+  }
+
+  const matchCase = getElement('matchCaseInput').checked;
+  const wholeWordsOnly = getElement('wholeWordInput').checked;
+  const limitToSelection = getElement('scanSelectedOnlyInput').checked;
+
+  const pagesToScan = limitToSelection && selectedPageIds.length > 0
+    ? getSelectedIndexesSorted()
+    : pageList.map(function (unusedEntry, index) { return index; });
+
+  openProgressOverlay('Scanning ' + pagesToScan.length + ' pages…');
+  pendingReplaceMatches = [];
+
+  let scannedCount = 0;
+
+  for (const pageIndex of pagesToScan) {
+    const pageEntry = pageList[pageIndex];
+
+    if (!pageEntry.isBlank && pageEntry.sourceId) {
+      const textContent = await loadTextContentForPage(pageEntry);
+      const searchPattern = buildSearchRegularExpression(searchTerm, matchCase, wholeWordsOnly);
+
+      textContent.items.forEach(function (textItem, runIndex) {
+        searchPattern.lastIndex = 0;
+        if (searchPattern.test(textItem.str)) {
+          pendingReplaceMatches.push({
+            pageIndex: pageIndex,
+            runIndex: runIndex,
+            originalText: textItem.str
+          });
+        }
+      });
+    }
+
+    scannedCount += 1;
+    updateProgressOverlay(scannedCount, pagesToScan.length);
+    if (scannedCount % 5 === 0) { await waitForMilliseconds(0); }
+  }
+
+  closeProgressOverlay();
+  renderReplaceResults(searchTerm);
+}
+
+function renderReplaceResults(searchTerm) {
+  const resultsPanel = getElement('replaceResults');
+  resultsPanel.innerHTML = '';
+  resultsPanel.style.display = 'block';
+
+  if (pendingReplaceMatches.length === 0) {
+    resultsPanel.textContent = 'No text runs contain "' + searchTerm + '".';
+    getElement('replaceAllButton').disabled = true;
+    return;
+  }
+
+  const summaryLine = document.createElement('div');
+  summaryLine.style.fontWeight = '700';
+  summaryLine.style.marginBottom = '8px';
+  summaryLine.style.color = 'var(--text-primary)';
+  summaryLine.textContent = pendingReplaceMatches.length + ' run' +
+    (pendingReplaceMatches.length === 1 ? '' : 's') + ' matched.';
+  resultsPanel.appendChild(summaryLine);
+
+  pendingReplaceMatches.slice(0, 60).forEach(function (match) {
+    const rowElement = document.createElement('div');
+    rowElement.className = 'replace-hit-row';
+
+    const pageLabel = document.createElement('span');
+    pageLabel.className = 'replace-hit-page';
+    pageLabel.textContent = 'Page ' + (match.pageIndex + 1);
+    rowElement.appendChild(pageLabel);
+
+    const textLabel = document.createElement('span');
+    textLabel.className = 'replace-hit-text';
+    textLabel.textContent = match.originalText;
+    rowElement.appendChild(textLabel);
+
+    resultsPanel.appendChild(rowElement);
+  });
+
+  if (pendingReplaceMatches.length > 60) {
+    const overflowLine = document.createElement('div');
+    overflowLine.style.marginTop = '8px';
+    overflowLine.style.color = 'var(--text-tertiary)';
+    overflowLine.textContent = 'and ' + (pendingReplaceMatches.length - 60) + ' more…';
+    resultsPanel.appendChild(overflowLine);
+  }
+
+  getElement('replaceAllButton').disabled = false;
+}
+
+/** Turns every pending match into a real cover-and-redraw edit. */
+async function commitReplaceAll() {
+  if (pendingReplaceMatches.length === 0) { return; }
+
+  const searchTerm = getElement('findTermInput').value;
+  const replacementTerm = getElement('replaceTermInput').value;
+  const matchCase = getElement('matchCaseInput').checked;
+  const wholeWordsOnly = getElement('wholeWordInput').checked;
+
+  pushHistorySnapshot();
+  openProgressOverlay('Applying replacements…');
+
+  /* Group the matches by page so each page is rendered for sampling once. */
+  const matchesByPageIndex = new Map();
+  pendingReplaceMatches.forEach(function (match) {
+    if (!matchesByPageIndex.has(match.pageIndex)) { matchesByPageIndex.set(match.pageIndex, []); }
+    matchesByPageIndex.get(match.pageIndex).push(match);
+  });
+
+  const pageIndexes = Array.from(matchesByPageIndex.keys());
+  let processedPages = 0;
+  let createdEditCount = 0;
+
+  for (const pageIndex of pageIndexes) {
+    const pageEntry = pageList[pageIndex];
+    const pageMatches = matchesByPageIndex.get(pageIndex);
+
+    let samplingBundle = null;
+    try {
+      samplingBundle = await renderPageForSampling(pageEntry, 1.4);
+    } catch (renderError) {
+      console.error('Could not render page for colour sampling', renderError);
+    }
+
+    const textContent = await loadTextContentForPage(pageEntry);
+    const existingEdits = getEditsForPage(pageEntry.uniqueId).slice(0);
+
+    pageMatches.forEach(function (match) {
+      const textItem = textContent.items[match.runIndex];
+      if (!textItem) { return; }
+
+      /* Skip runs that already carry an edit — do not stack two covers. */
+      const alreadyEdited = existingEdits.some(function (candidate) {
+        return candidate.kind === 'replace' &&
+          candidate.sourceRunIndexes.indexOf(match.runIndex) !== -1;
+      });
+      if (alreadyEdited) { return; }
+
+      const searchPattern = buildSearchRegularExpression(searchTerm, matchCase, wholeWordsOnly);
+      const rewrittenText = textItem.str.replace(searchPattern, replacementTerm);
+
+      const runGeometry = samplingBundle
+        ? deriveRunGeometry(textItem, samplingBundle.viewport)
+        : deriveRunGeometry(textItem, { transform: [1, 0, 0, -1, 0, 0], scale: 1 });
+
+      let paperColour = '#FFFFFF';
+      let inkColour = '#1A1A1A';
+      let fontKey = 'Helvetica';
+
+      if (samplingBundle) {
+        const deviceRect = computeRunDeviceRect(runGeometry);
+        paperColour = samplePaperColourAroundRect(samplingBundle.canvas, deviceRect);
+        inkColour = sampleInkColourInsideRect(samplingBundle.canvas, deviceRect);
+        fontKey = chooseStandardFontKey(samplingBundle.pdfjsPage, textItem.fontName);
+      }
+
+      const coverPadding = 1;
+      const ascentHeight = runGeometry.userFontSize * COVER_ASCENT_FACTOR;
+      const descentHeight = runGeometry.userFontSize * COVER_DESCENT_FACTOR;
+
+      existingEdits.push({
+        editId: createUniqueId('edit'),
+        kind: 'replace',
+        sourceRunIndexes: [match.runIndex],
+        originalText: textItem.str,
+        newText: rewrittenText,
+
+        baselineX: runGeometry.userBaselineX,
+        baselineY: runGeometry.userBaselineY,
+        boxWidth: Math.max(1, runGeometry.userWidth),
+
+        coverX: runGeometry.userBaselineX - coverPadding,
+        coverY: runGeometry.userBaselineY - descentHeight - coverPadding,
+        coverWidth: Math.max(1, runGeometry.userWidth) + coverPadding * 2,
+        coverHeight: ascentHeight + descentHeight + coverPadding * 2,
+        coverPadding: coverPadding,
+
+        fontKey: fontKey,
+        fontSize: Math.round(runGeometry.userFontSize * 10) / 10,
+        textColorHex: inkColour,
+        coverColorHex: paperColour,
+
+        offsetX: 0,
+        offsetY: 0,
+        alignment: 'left',
+        shrinkToFit: true,
+        drawCover: true
+      });
+
+      createdEditCount += 1;
+    });
+
+    setEditsForPage(pageEntry.uniqueId, existingEdits);
+
+    processedPages += 1;
+    updateProgressOverlay(processedPages, pageIndexes.length);
+    await waitForMilliseconds(0);
+  }
+
+  closeProgressOverlay();
+  pendingReplaceMatches = [];
+  getElement('replaceAllButton').disabled = true;
+  getElement('findReplaceModal').classList.remove('is-open');
+
+  renderEverything();
+  if (currentMode === 'text') { openEditorPage(editorPageIndex); }
+
+  showToast('Created ' + createdEditCount + ' replacement' +
+    (createdEditCount === 1 ? '' : 's') + ' across ' + pageIndexes.length + ' page' +
+    (pageIndexes.length === 1 ? '' : 's') + '.', 'success');
+}
+
+/* ==========================================================================
+   17. EXPORT AND BUILD PIPELINE
+   ========================================================================== */
+
+/**
+ * The standard fonts are WinAnsi encoded, so characters outside that range
+ * cannot be drawn. Common typographic characters are folded down to their
+ * ASCII equivalents; anything still unsupported becomes a question mark, and
+ * the caller is told how many substitutions happened.
+ */
+const TYPOGRAPHIC_FOLDING_MAP = {
+  '\u2018': "'", '\u2019': "'", '\u201A': ',', '\u201B': "'",
+  '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u2013': '-', '\u2014': '-', '\u2212': '-',
+  '\u2026': '...', '\u00A0': ' ', '\u2022': '-',
+  '\u2032': "'", '\u2033': '"', '\u00D7': 'x'
+};
+
+let unsupportedCharacterCount = 0;
+
+function makeTextEncodable(rawText) {
+  let output = '';
+
+  for (const character of String(rawText)) {
+    if (Object.prototype.hasOwnProperty.call(TYPOGRAPHIC_FOLDING_MAP, character)) {
+      output += TYPOGRAPHIC_FOLDING_MAP[character];
+      continue;
+    }
+
+    const codePoint = character.codePointAt(0);
+    if (codePoint <= 0x00FF) {
+      output += character;
+    } else {
+      output += '?';
+      unsupportedCharacterCount += 1;
+    }
+  }
+
+  return output;
+}
+
+async function getEmbeddedStandardFont(outputDocument, fontCache, fontKey) {
+  if (fontCache.has(fontKey)) { return fontCache.get(fontKey); }
+  const standardFont = STANDARD_FONT_LOOKUP[fontKey] || PDFLibStandardFonts.Helvetica;
+  const embeddedFont = await outputDocument.embedFont(standardFont);
+  fontCache.set(fontKey, embeddedFont);
+  return embeddedFont;
+}
+
+/**
+ * Paints one page's worth of cover rectangles and replacement text onto an
+ * assembled output page. This is where an edit stops being a plan and becomes
+ * ink on the document.
+ */
+async function applyTextEditsToOutputPage(outputDocument, outputPage, editArray, fontCache) {
+  for (const editOperation of editArray) {
+
+    /* --- 1. The cover rectangle --- */
+    if (editOperation.drawCover && editOperation.coverWidth > 0 && editOperation.coverHeight > 0) {
+      const coverChannels = hexToRgbChannels(editOperation.coverColorHex);
+      outputPage.drawRectangle({
+        x: editOperation.coverX,
+        y: editOperation.coverY,
+        width: editOperation.coverWidth,
+        height: editOperation.coverHeight,
+        color: PDFLibRgb(coverChannels.red, coverChannels.green, coverChannels.blue)
+      });
+    }
+
+    /* --- 2. The replacement text --- */
+    const replacementText = String(editOperation.newText || '');
+    if (replacementText.trim().length === 0) { continue; }
+
+    const embeddedFont = await getEmbeddedStandardFont(
+      outputDocument, fontCache, editOperation.fontKey
+    );
+    const textChannels = hexToRgbChannels(editOperation.textColorHex);
+    const textLines = replacementText.split('\n').map(makeTextEncodable);
+
+    /* Shrink so the longest line fits inside the original run's width. */
+    let effectiveFontSize = editOperation.fontSize;
+
+    if (editOperation.shrinkToFit && editOperation.boxWidth > 0) {
+      let widestLineWidth = 0;
+      textLines.forEach(function (line) {
+        widestLineWidth = Math.max(
+          widestLineWidth,
+          embeddedFont.widthOfTextAtSize(line, effectiveFontSize)
+        );
+      });
+
+      if (widestLineWidth > editOperation.boxWidth) {
+        const shrinkRatio = editOperation.boxWidth / widestLineWidth;
+        effectiveFontSize = Math.max(1, effectiveFontSize * shrinkRatio);
+      }
+    }
+
+    const lineLeading = effectiveFontSize * 1.16;
+
+    textLines.forEach(function (line, lineIndex) {
+      const lineWidth = embeddedFont.widthOfTextAtSize(line, effectiveFontSize);
+
+      let drawX = editOperation.baselineX + editOperation.offsetX;
+      if (editOperation.alignment === 'center') {
+        drawX += (editOperation.boxWidth - lineWidth) / 2;
+      } else if (editOperation.alignment === 'right') {
+        drawX += editOperation.boxWidth - lineWidth;
+      }
+
+      const drawY = editOperation.baselineY + editOperation.offsetY - lineIndex * lineLeading;
+
+      try {
+        outputPage.drawText(line, {
+          x: drawX,
+          y: drawY,
+          size: effectiveFontSize,
+          font: embeddedFont,
+          color: PDFLibRgb(textChannels.red, textChannels.green, textChannels.blue)
+        });
+      } catch (drawError) {
+        console.error('Could not draw replacement text', line, drawError);
+      }
+    });
+  }
+}
+
+/** Groups an ordered page list into contiguous runs sharing the same source. */
 function groupPagesIntoSourceRuns(pagesToBuild) {
   const runs = [];
   let currentRun = null;
@@ -2860,9 +5410,6 @@ function groupPagesIntoSourceRuns(pagesToBuild) {
   return runs;
 }
 
-/**
- * Works out where a stamped page number should sit on the page.
- */
 function computeStampCoordinates(position, pageWidth, pageHeight, textWidth, fontSize) {
   const horizontalMargin = 36;
   const verticalMargin = 28;
@@ -2883,20 +5430,20 @@ function formatStampText(formatKey, currentNumber, totalCount) {
   return String(currentNumber);
 }
 
-/**
- * Builds a brand new PDF from the supplied page descriptors and returns bytes.
- */
+/** Builds a brand new PDF from the supplied page descriptors. */
 async function buildPdfBytes(pagesToBuild, options) {
   const settings = options || {};
   const outputDocument = await PDFLibDocument.create();
+  const fontCache = new Map();
 
-  if (settings.documentTitle) {
-    outputDocument.setTitle(settings.documentTitle);
-  }
+  unsupportedCharacterCount = 0;
+
+  if (settings.documentTitle) { outputDocument.setTitle(settings.documentTitle); }
   outputDocument.setProducer('Polymath PDF Studio');
   outputDocument.setCreator('Polymath PDF Studio');
   outputDocument.setModificationDate(new Date());
 
+  /* --- Stage one: assemble the pages in order --- */
   const runs = groupPagesIntoSourceRuns(pagesToBuild);
   let pagesCompleted = 0;
 
@@ -2928,10 +5475,24 @@ async function buildPdfBytes(pagesToBuild, options) {
     await waitForMilliseconds(0);
   }
 
-  /* Optional page-number stamping, applied after assembly so numbering
-     always reflects the final page order. */
+  /* --- Stage two: burn in the text edits ---
+     Pages were added strictly in order, so index i of the output corresponds
+     to index i of pagesToBuild. */
+  const assembledPages = outputDocument.getPages();
+
+  for (let pageIndex = 0; pageIndex < pagesToBuild.length; pageIndex += 1) {
+    const pageEdits = getEditsForPage(pagesToBuild[pageIndex].uniqueId);
+    if (pageEdits.length === 0) { continue; }
+
+    const outputPage = assembledPages[pageIndex];
+    if (!outputPage) { continue; }
+
+    await applyTextEditsToOutputPage(outputDocument, outputPage, pageEdits, fontCache);
+  }
+
+  /* --- Stage three: optional page-number stamping --- */
   if (settings.stampPageNumbers) {
-    const helveticaFont = await outputDocument.embedFont(PDFLibStandardFonts.Helvetica);
+    const helveticaFont = await getEmbeddedStandardFont(outputDocument, fontCache, 'Helvetica');
     const finalPages = outputDocument.getPages();
     const fontSize = settings.stampFontSize;
 
@@ -2952,6 +5513,12 @@ async function buildPdfBytes(pagesToBuild, options) {
         color: PDFLibRgb(0.25, 0.25, 0.25)
       });
     });
+  }
+
+  if (unsupportedCharacterCount > 0) {
+    showToast(unsupportedCharacterCount + ' character' +
+      (unsupportedCharacterCount === 1 ? '' : 's') +
+      ' could not be encoded by the standard fonts and became "?".', 'error');
   }
 
   return outputDocument.save({ useObjectStreams: true });
@@ -3031,11 +5598,9 @@ async function splitIntoChunks() {
   }
 
   const totalChunks = Math.ceil(pageList.length / chunkSize);
-  if (totalChunks > 30) {
-    const confirmed = window.confirm(
-      'That will produce ' + totalChunks + ' separate downloads. Continue?'
-    );
-    if (!confirmed) { return; }
+  if (totalChunks > 30 &&
+      !window.confirm('That will produce ' + totalChunks + ' separate downloads. Continue?')) {
+    return;
   }
 
   openProgressOverlay('Splitting into ' + totalChunks + ' files…');
@@ -3095,9 +5660,90 @@ async function printCurrentDocument() {
   }
 }
 
-/* --------------------------------------------------------------------------
-   14. KEYBOARD SHORTCUTS
-   -------------------------------------------------------------------------- */
+/**
+ * Renders the page currently open in the text editor exactly as it will be
+ * exported — cover rectangles, replacement text and all — by building a
+ * one-page PDF and handing it straight back to pdf.js.
+ */
+async function previewCurrentPageResult() {
+  if (pageList.length === 0) { return; }
+
+  openProgressOverlay('Rendering the finished page…');
+
+  try {
+    const singlePageBytes = await buildPdfBytes([pageList[editorPageIndex]], {
+      documentTitle: '', stampPageNumbers: false
+    });
+
+    const previewDocument = await pdfjsLib.getDocument({ data: singlePageBytes.slice(0) }).promise;
+    const previewPage = await previewDocument.getPage(1);
+
+    const canvasElement = getElement('previewCanvas');
+    const drawingContext = canvasElement.getContext('2d');
+    const unitViewport = previewPage.getViewport({ scale: 1 });
+    const targetWidth = Math.min(1400, Math.max(700, window.innerWidth * 1.1));
+    const scaledViewport = previewPage.getViewport({ scale: targetWidth / unitViewport.width });
+
+    canvasElement.width = Math.floor(scaledViewport.width);
+    canvasElement.height = Math.floor(scaledViewport.height);
+    drawingContext.fillStyle = '#FFFFFF';
+    drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
+
+    await previewPage.render({ canvasContext: drawingContext, viewport: scaledViewport }).promise;
+
+    getElement('previewTitle').textContent =
+      'Page ' + (editorPageIndex + 1) + ' as it will export';
+    getElement('previewPositionText').textContent =
+      getEditsForPage(pageList[editorPageIndex].uniqueId).length + ' edit(s) applied';
+
+    closeProgressOverlay();
+    getElement('previewModal').classList.add('is-open');
+  } catch (previewError) {
+    console.error(previewError);
+    closeProgressOverlay();
+    showToast('Could not render the preview.', 'error');
+  }
+}
+
+/* ==========================================================================
+   18. MODE SWITCHING
+   ========================================================================== */
+
+function switchToMode(nextMode) {
+  currentMode = nextMode;
+
+  document.querySelectorAll('.mode-switch-button').forEach(function (buttonElement) {
+    buttonElement.classList.toggle('is-active',
+      buttonElement.getAttribute('data-mode') === nextMode);
+  });
+
+  updateLayoutVisibility();
+
+  if (nextMode === 'text' && pageList.length > 0) {
+    /* Jump straight to whichever page the user last selected in Pages mode. */
+    const selectedIndexes = getSelectedIndexesSorted();
+    if (selectedIndexes.length > 0) { editorPageIndex = selectedIndexes[0]; }
+    openEditorPage(editorPageIndex);
+  }
+}
+
+function openTextEditorForPage(pageUniqueId) {
+  const pageIndex = findPageIndexById(pageUniqueId);
+  if (pageIndex === -1) { return; }
+  editorPageIndex = pageIndex;
+  switchToMode('text');
+}
+
+function stepEditorPage(offset) {
+  if (pageList.length === 0) { return; }
+  const nextIndex = clampNumber(editorPageIndex + offset, 0, pageList.length - 1);
+  if (nextIndex === editorPageIndex) { return; }
+  openEditorPage(nextIndex);
+}
+
+/* ==========================================================================
+   19. KEYBOARD SHORTCUTS
+   ========================================================================== */
 
 function isTypingIntoField(eventTarget) {
   if (!eventTarget) { return false; }
@@ -3106,14 +5752,41 @@ function isTypingIntoField(eventTarget) {
          eventTarget.isContentEditable === true;
 }
 
+function anyModalIsOpen() {
+  return document.querySelector('.modal-backdrop.is-open') !== null;
+}
+
+function closeTopmostModal() {
+  const openModals = document.querySelectorAll('.modal-backdrop.is-open');
+  if (openModals.length === 0) { return false; }
+  openModals[openModals.length - 1].classList.remove('is-open');
+  return true;
+}
+
 function handleGlobalKeyDown(keyEvent) {
   const previewIsOpen = getElement('previewModal').classList.contains('is-open');
-  const shortcutsAreOpen = getElement('shortcutsModal').classList.contains('is-open');
 
   if (keyEvent.key === 'Escape') {
-    if (previewIsOpen) { closePreview(); return; }
-    if (shortcutsAreOpen) { getElement('shortcutsModal').classList.remove('is-open'); return; }
-    if (!isTypingIntoField(keyEvent.target)) { clearSelection(); }
+    if (closeTopmostModal()) { return; }
+    if (isTypingIntoField(keyEvent.target)) { return; }
+
+    if (currentMode === 'text') {
+      pickedRunIndexes = [];
+      pickedEditId = null;
+      buildTextOverlay();
+      renderInspector();
+    } else {
+      clearSelection();
+    }
+    return;
+  }
+
+  /* Ctrl+Enter applies whatever is open in the inspector, even mid-typing. */
+  if ((keyEvent.ctrlKey || keyEvent.metaKey) && keyEvent.key === 'Enter') {
+    if (currentMode === 'text' && inspectorDraftEdit) {
+      keyEvent.preventDefault();
+      applyInspectorEdit();
+    }
     return;
   }
 
@@ -3123,25 +5796,49 @@ function handleGlobalKeyDown(keyEvent) {
     return;
   }
 
-  if (isTypingIntoField(keyEvent.target)) { return; }
-
   const usesCommandModifier = keyEvent.ctrlKey || keyEvent.metaKey;
   const lowerKey = keyEvent.key.toLowerCase();
 
+  /* A few shortcuts must work even while a field has focus. */
+  if (usesCommandModifier && lowerKey === 's') {
+    keyEvent.preventDefault();
+    downloadWholeDocument();
+    return;
+  }
+
+  if (usesCommandModifier && lowerKey === 'f' && pageList.length > 0) {
+    keyEvent.preventDefault();
+    openFindReplaceDialog();
+    return;
+  }
+
+  if (isTypingIntoField(keyEvent.target) || anyModalIsOpen()) { return; }
+
+  if (currentMode === 'text') {
+    if (keyEvent.key === 'PageDown') { keyEvent.preventDefault(); stepEditorPage(1); return; }
+    if (keyEvent.key === 'PageUp') { keyEvent.preventDefault(); stepEditorPage(-1); return; }
+  }
+
   if (usesCommandModifier) {
-    if (lowerKey === 'a') { keyEvent.preventDefault(); selectAllPages(); return; }
-    if (lowerKey === 'c') { keyEvent.preventDefault(); copySelectedPages(); return; }
-    if (lowerKey === 'x') { keyEvent.preventDefault(); cutSelectedPages(); return; }
-    if (lowerKey === 'v') { keyEvent.preventDefault(); pasteClipboardPages(); return; }
-    if (lowerKey === 'd') { keyEvent.preventDefault(); duplicateSelectedPages(); return; }
-    if (lowerKey === 's') { keyEvent.preventDefault(); downloadWholeDocument(); return; }
     if (lowerKey === 'z') {
       keyEvent.preventDefault();
       if (keyEvent.shiftKey) { performRedo(); } else { performUndo(); }
       return;
     }
     if (lowerKey === 'y') { keyEvent.preventDefault(); performRedo(); return; }
+
+    /* The remaining clipboard shortcuts only apply to Pages mode. */
+    if (currentMode !== 'pages') { return; }
+
+    if (lowerKey === 'a') { keyEvent.preventDefault(); selectAllPages(); return; }
+    if (lowerKey === 'c') { keyEvent.preventDefault(); copySelectedPages(); return; }
+    if (lowerKey === 'x') { keyEvent.preventDefault(); cutSelectedPages(); return; }
+    if (lowerKey === 'v') { keyEvent.preventDefault(); pasteClipboardPages(); return; }
+    if (lowerKey === 'd') { keyEvent.preventDefault(); duplicateSelectedPages(); return; }
+    return;
   }
+
+  if (currentMode !== 'pages') { return; }
 
   if (keyEvent.key === 'Delete' || keyEvent.key === 'Backspace') {
     keyEvent.preventDefault();
@@ -3156,9 +5853,17 @@ function handleGlobalKeyDown(keyEvent) {
   if (keyEvent.altKey && keyEvent.key === 'ArrowRight') { keyEvent.preventDefault(); moveSelection(1); return; }
 }
 
-/* --------------------------------------------------------------------------
-   15. EVENT WIRING AND BOOT
-   -------------------------------------------------------------------------- */
+/* ==========================================================================
+   20. EVENT WIRING AND BOOT
+   ========================================================================== */
+
+function openFindReplaceDialog() {
+  pendingReplaceMatches = [];
+  getElement('replaceResults').style.display = 'none';
+  getElement('replaceAllButton').disabled = true;
+  getElement('findReplaceModal').classList.add('is-open');
+  setTimeout(function () { getElement('findTermInput').focus(); }, 60);
+}
 
 function wireFileImportControls() {
   const dropZone = getElement('dropZone');
@@ -3168,13 +5873,10 @@ function wireFileImportControls() {
   getElement('addFilesButton').addEventListener('click', function () { fileInput.click(); });
 
   fileInput.addEventListener('change', function () {
-    if (fileInput.files && fileInput.files.length > 0) {
-      importFiles(fileInput.files, null);
-    }
+    if (fileInput.files && fileInput.files.length > 0) { importFiles(fileInput.files, null); }
     fileInput.value = '';
   });
 
-  /* Drag files anywhere onto the window to import them. */
   ['dragenter', 'dragover'].forEach(function (eventName) {
     window.addEventListener(eventName, function (dragEvent) {
       if (draggedPageIds.length > 0) { return; }
@@ -3189,9 +5891,7 @@ function wireFileImportControls() {
 
   ['dragleave', 'dragend'].forEach(function (eventName) {
     window.addEventListener(eventName, function (dragEvent) {
-      if (dragEvent.relatedTarget === null) {
-        dropZone.classList.remove('is-dragging-over');
-      }
+      if (dragEvent.relatedTarget === null) { dropZone.classList.remove('is-dragging-over'); }
     });
   });
 
@@ -3226,6 +5926,7 @@ function wireGridInteractions() {
       if (actionName === 'duplicate') { duplicateSinglePage(uniqueId); }
       if (actionName === 'delete') { deleteSinglePage(uniqueId); }
       if (actionName === 'preview') { openPreviewAtIndex(findPageIndexById(uniqueId)); }
+      if (actionName === 'edit-text') { openTextEditorForPage(uniqueId); }
       return;
     }
 
@@ -3235,14 +5936,13 @@ function wireGridInteractions() {
   pageGrid.addEventListener('dblclick', function (clickEvent) {
     const cardElement = clickEvent.target.closest('.page-card');
     if (!cardElement) { return; }
-    const uniqueId = cardElement.getAttribute('data-uid');
-    openPreviewAtIndex(findPageIndexById(uniqueId));
+    openPreviewAtIndex(findPageIndexById(cardElement.getAttribute('data-uid')));
   });
 
   attachGridDragHandlers();
 }
 
-function wireToolbarButtons() {
+function wirePagesToolbar() {
   getElement('undoButton').addEventListener('click', performUndo);
   getElement('redoButton').addEventListener('click', performRedo);
   getElement('rotateLeftButton').addEventListener('click', function () { rotateSelectedPages(-90); });
@@ -3282,6 +5982,106 @@ function wireSelectionTools() {
   });
 }
 
+function wireTextToolbar() {
+  getElement('toolSelectButton').addEventListener('click', function () { setActiveTextTool('select'); });
+  getElement('toolInsertButton').addEventListener('click', function () { setActiveTextTool('insert'); });
+  getElement('toolWhiteoutButton').addEventListener('click', function () { setActiveTextTool('whiteout'); });
+
+  getElement('findReplaceButton').addEventListener('click', openFindReplaceDialog);
+  getElement('copyPageTextButton').addEventListener('click', copyCurrentPageText);
+  getElement('previewResultButton').addEventListener('click', previewCurrentPageResult);
+  getElement('clearPageEditsButton').addEventListener('click', clearEditsOnCurrentPage);
+
+  getElement('toggleRunOutlinesButton').addEventListener('click', function () {
+    showRunOutlines = !showRunOutlines;
+    getElement('toggleRunOutlinesButton').classList.toggle('is-tool-active', showRunOutlines);
+    buildTextOverlay();
+  });
+
+  getElement('editorPrevPageButton').addEventListener('click', function () { stepEditorPage(-1); });
+  getElement('editorNextPageButton').addEventListener('click', function () { stepEditorPage(1); });
+
+  getElement('editorPageInput').addEventListener('change', function (changeEvent) {
+    const requestedPage = parseInt(changeEvent.target.value, 10);
+    if (isNaN(requestedPage)) { return; }
+    openEditorPage(requestedPage - 1);
+  });
+
+  getElement('editorZoomSlider').addEventListener('change', function () {
+    openEditorPage(editorPageIndex);
+  });
+}
+
+function wireInspector() {
+  const overlayElement = getElement('textOverlay');
+  overlayElement.addEventListener('click', handleOverlayClick);
+  overlayElement.addEventListener('mousedown', handleOverlayPointerDown);
+
+  getElement('applyEditButton').addEventListener('click', applyInspectorEdit);
+
+  getElement('removeEditButton').addEventListener('click', function () {
+    if (inspectorDraftEdit) { removeEdit(inspectorDraftEdit.editId); }
+  });
+
+  getElement('deselectObjectButton').addEventListener('click', function () {
+    pickedRunIndexes = [];
+    pickedEditId = null;
+    buildTextOverlay();
+    renderInspector();
+  });
+
+  /* Live preview: every field change flows straight into the object being
+     edited, and the overlay repaints so the change is visible on the page.
+     Nothing is committed to the document until Apply, and nothing is written
+     into the PDF itself until Download. */
+  const liveFieldIds = [
+    'replacementInput', 'editFontSelect', 'editFontSizeInput', 'editTextColorInput',
+    'editCoverColorInput', 'editOffsetXInput', 'editOffsetYInput', 'editCoverPaddingInput',
+    'editAlignSelect', 'editShrinkToFitInput', 'editDrawCoverInput'
+  ];
+
+  liveFieldIds.forEach(function (fieldId) {
+    getElement(fieldId).addEventListener('input', function () {
+      if (!inspectorDraftEdit || pageList.length === 0) { return; }
+      readInspectorFieldsInto(inspectorDraftEdit);
+      recomputeCoverRectangle(inspectorDraftEdit);
+
+      /* Only repaint if this edit is already part of the page, otherwise the
+         draft has nothing on screen to update. */
+      const pageEdits = getEditsForPage(pageList[editorPageIndex].uniqueId);
+      const isCommitted = pageEdits.some(function (candidate) {
+        return candidate.editId === inspectorDraftEdit.editId;
+      });
+      if (isCommitted) {
+        buildTextOverlay();
+        renderPageEditList();
+      }
+    });
+  });
+}
+
+function wireFindReplace() {
+  getElement('findScanButton').addEventListener('click', scanDocumentForMatches);
+  getElement('replaceAllButton').addEventListener('click', commitReplaceAll);
+
+  getElement('findReplaceCloseButton').addEventListener('click', function () {
+    getElement('findReplaceModal').classList.remove('is-open');
+  });
+
+  getElement('findReplaceModal').addEventListener('click', function (clickEvent) {
+    if (clickEvent.target === getElement('findReplaceModal')) {
+      getElement('findReplaceModal').classList.remove('is-open');
+    }
+  });
+
+  getElement('findTermInput').addEventListener('keydown', function (keyEvent) {
+    if (keyEvent.key === 'Enter') {
+      keyEvent.preventDefault();
+      scanDocumentForMatches();
+    }
+  });
+}
+
 function wireExportControls() {
   getElement('downloadAllButton').addEventListener('click', downloadWholeDocument);
   getElement('downloadSelectedButton').addEventListener('click', downloadSelectionOnly);
@@ -3315,12 +6115,33 @@ function wireModals() {
       getElement('shortcutsModal').classList.remove('is-open');
     }
   });
+
+  getElement('explainerButton').addEventListener('click', function () {
+    getElement('explainerModal').classList.add('is-open');
+  });
+
+  getElement('explainerCloseButton').addEventListener('click', function () {
+    getElement('explainerModal').classList.remove('is-open');
+  });
+
+  getElement('explainerModal').addEventListener('click', function (clickEvent) {
+    if (clickEvent.target === getElement('explainerModal')) {
+      getElement('explainerModal').classList.remove('is-open');
+    }
+  });
+}
+
+function wireModeSwitch() {
+  document.querySelectorAll('.mode-switch-button').forEach(function (buttonElement) {
+    buttonElement.addEventListener('click', function () {
+      switchToMode(buttonElement.getAttribute('data-mode'));
+    });
+  });
 }
 
 function wireWindowGuards() {
   document.addEventListener('keydown', handleGlobalKeyDown);
 
-  /* Clicking empty space below the grid clears the selection. */
   getElement('pageGrid').addEventListener('mousedown', function (mouseEvent) {
     if (mouseEvent.target === getElement('pageGrid')) { clearSelection(); }
   });
@@ -3336,11 +6157,17 @@ function wireWindowGuards() {
 function bootApplication() {
   wireFileImportControls();
   wireGridInteractions();
-  wireToolbarButtons();
+  wirePagesToolbar();
   wireSelectionTools();
+  wireTextToolbar();
+  wireInspector();
+  wireFindReplace();
   wireExportControls();
   wireModals();
+  wireModeSwitch();
   wireWindowGuards();
+
+  setActiveTextTool('select');
   renderEverything();
 }
 
