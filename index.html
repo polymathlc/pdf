@@ -7,7 +7,7 @@
 
 <!--
   ============================================================================
-  POLYMATH PDF STUDIO  v2.0.0
+  POLYMATH PDF STUDIO  v2.1.0
   ----------------------------------------------------------------------------
   A completely client-side PDF editor. Nothing is ever uploaded to a server —
   every byte of every file stays inside this browser tab.
@@ -16,7 +16,7 @@
     * pdf.js   — renders thumbnails, the large preview, and the text layer
     * pdf-lib  — rebuilds and exports the edited PDF document
 
-  TWO WORKING MODES
+  TWO MODES AND AN EDITOR
   ----------------------------------------------------------------------------
   PAGES MODE  — the visual page organiser
       Import many PDFs, reorder by dragging, delete, duplicate, rotate,
@@ -31,6 +31,19 @@
       the replacement string is drawn at the same baseline using a matched
       standard font. Also supports free-floating new text boxes, whiteout
       rectangles, and a document-wide find-and-replace.
+
+  TOUCH UP    — the raster editor, on any page, from either mode
+      The page rendered to pixels and handed a full paint editor: erase, paint,
+      paint bucket, clone stamp, history brush, rectangle / lasso / magic-wand
+      selection, move, resize, rotate, skew, straighten, smart fill, straight
+      lines, pasted pictures, and text labels in any of two dozen faces. It is
+      the answer to everything a text object model cannot express — a scan, a
+      stray mark, a crooked page, a signature, a diagram to cover.
+
+      Ported tool for tool from the Science app's "Touch up & label" editor
+      (polymathlc/cer), so a fix made in either app can be carried across. What
+      it stores is one PNG per page, held in the page's own unrotated
+      orientation and laid over that page at export, underneath any text edits.
 
   HOW THE TEXT EDITING ACTUALLY WORKS (and its honest limits)
   ----------------------------------------------------------------------------
@@ -61,6 +74,13 @@
   contain no text objects at all — only pixels.
   ============================================================================
 -->
+
+<!-- The web faces the touch-up editor's text tool offers, in ONE request and
+     loaded non-blocking (media="print" until it arrives), so it can never delay
+     first paint. Every other face in the picker is a system font and needs no
+     request at all, so the tool works whether or not this ever loads. -->
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,700;1,400;1,700&family=Open+Sans:ital,wght@0,400;0,700;1,400;1,700&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Montserrat:ital,wght@0,400;0,700;1,400;1,700&family=Poppins:ital,wght@0,400;0,700;1,400;1,700&family=Merriweather:ital,wght@0,400;0,700;1,400;1,700&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Roboto+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Oswald:wght@400;700&family=Questrial&display=swap">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -649,6 +669,14 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   color: var(--edit-dark);
   font-size: 0.62rem;
   font-weight: 700;
+}
+
+/* A touched-up page is marked in the accent colour rather than Text mode's
+   purple: the two are different kinds of change to the same page, and a
+   teacher scanning the grid should be able to tell them apart at a glance. */
+.edit-marker.is-touchup {
+  background: var(--accent-bg);
+  color: #8A5A12;
 }
 
 .source-chip {
@@ -1560,7 +1588,7 @@ kbd {
 <div class="title-block page-fade-in">
   <h1 class="app-title">PDF Studio</h1>
   <p class="app-subtitle">
-    Reorganise pages, then rewrite the words on them — all without leaving the browser.
+    Reorganise pages, rewrite the words on them, and touch up anything that is not text — all without leaving the browser.
   </p>
   <div class="privacy-note">
     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -1705,6 +1733,14 @@ kbd {
           <path d="M3 16V5a2 2 0 0 1 2-2h11"></path>
         </svg>
         <span>Duplicate</span>
+      </button>
+      <button class="tool-button" id="touchUpButton" title="Touch up the selected page — erase, paint, clone, select, straighten and label it (one page at a time)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15.5 4.5l4 4"></path>
+          <path d="M17 3l4 4-9.5 9.5-5 1 1-5L17 3z"></path>
+          <path d="M6 17c-1.6.6-2 2.2-2 4 1.8 0 3.4-.4 4-2"></path>
+        </svg>
+        <span>Touch up</span>
       </button>
     </div>
 
@@ -1893,6 +1929,14 @@ kbd {
         <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path>
       </svg>
       <strong id="editCountText">0</strong> text edits
+    </div>
+
+    <div class="status-metric" id="touchUpMetric" style="display: none;">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15.5 4.5l4 4"></path>
+        <path d="M17 3l4 4-9.5 9.5-5 1 1-5L17 3z"></path>
+      </svg>
+      <strong id="touchUpCountText">0</strong> touched up
     </div>
 
     <div class="status-spacer"></div>
@@ -2385,6 +2429,20 @@ kbd {
         <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>Open find and replace</td></tr>
         <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Move to the previous or next page</td></tr>
 
+        <tr><td colspan="2" class="shortcut-section-heading">Touch-up editor</td></tr>
+        <tr><td><kbd>E</kbd> / <kbd>B</kbd> / <kbd>G</kbd></td><td>Erase, paint, paint bucket</td></tr>
+        <tr><td><kbd>S</kbd> / <kbd>Y</kbd></td><td>Clone stamp, history brush</td></tr>
+        <tr><td><kbd>M</kbd> / <kbd>L</kbd> / <kbd>W</kbd></td><td>Rectangle select, lasso, magic wand</td></tr>
+        <tr><td><kbd>V</kbd> / <kbd>F</kbd> / <kbd>R</kbd> / <kbd>K</kbd></td><td>Move, resize, rotate, skew</td></tr>
+        <tr><td><kbd>U</kbd> / <kbd>T</kbd></td><td>Straight line, text label</td></tr>
+        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Brush size down or up</td></tr>
+        <tr><td><kbd>Space</kbd> + drag</td><td>Pan; scroll the wheel to zoom</td></tr>
+        <tr><td><kbd>0</kbd></td><td>Fit the whole page in view</td></tr>
+        <tr><td><kbd>Delete</kbd></td><td>Cut the selected area away</td></tr>
+        <tr><td><kbd>Ctrl</kbd> + <kbd>V</kbd></td><td>Paste a picture onto the page</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Apply the transform, or the touch-up</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Cancel the transform, deselect, then close</td></tr>
+
         <tr><td colspan="2" class="shortcut-section-heading">Anywhere</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Z</kbd></td><td>Undo</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td><td>Redo</td></tr>
@@ -2392,6 +2450,190 @@ kbd {
         <tr><td><kbd>Esc</kbd></td><td>Clear the selection or close a dialog</td></tr>
         <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Move through pages while previewing</td></tr>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     TOUCH-UP EDITOR
+     ==========================================================================
+     Ported tool-for-tool from the Science app's "Touch up & label" editor so a
+     fix in either app can be carried straight across. Everything here is one
+     canvas: the page is rendered to pixels, edited, and written back onto the
+     page descriptor as a raster that export lays over the original.
+     ========================================================================== -->
+<div class="modal-backdrop" id="annotOverlay">
+  <div class="modal-card" style="width: min(1180px, 98vw);">
+    <div class="modal-header">
+      <span class="modal-title" id="annotTitle">Touch up</span>
+      <button class="icon-button" id="annotCloseButton" aria-label="Close" onclick="closeAnnotTool()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-body" style="text-align: center;">
+      <div class="annot-tools">
+        <button type="button" class="annot-tool" data-atool="erase" title="Erase (E) — paints white over whatever you drag across, which is what rubbing a word off paper means. Click a point then Shift-click another to join them with a straight line; Shift-drag locks the stroke to horizontal or vertical.">Erase</button>
+        <button type="button" class="annot-tool" id="annotEraseTo" onclick="annotToggleEraseTo()" title="What Erase, the paint bucket and Delete leave behind: white (right for a page of paper) or transparent (right when you are cutting something out). Anything still transparent when you press Apply is flattened onto white, because a PDF page is not see-through.">Erase to: <b>white</b></button>
+        <button type="button" class="annot-tool" data-atool="paint" title="Paint (B) — draw in the chosen colour. Click a point then Shift-click another to join them with a straight line; Shift-drag locks to horizontal or vertical.">Paint</button>
+        <button type="button" class="annot-tool" data-atool="fill" title="Paint bucket (G) — click inside a shape or an area to flood it with the chosen colour. The strip along the base of the bucket is the colour that will be poured.">
+          <svg class="annot-bucket" viewBox="0 0 24 26" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round">
+              <path d="M11.2 4.2 4.4 11a1.7 1.7 0 0 0 0 2.4l4.9 4.9a1.7 1.7 0 0 0 2.4 0l6.8-6.8z"/>
+              <path d="M8.9 6.5 6.4 4"/>
+            </g>
+            <path d="M20.6 12.6s1.9 2.5 1.9 3.8a1.9 1.9 0 1 1-3.8 0c0-1.3 1.9-3.8 1.9-3.8z" class="annot-bucket-paint"/>
+            <rect x="2" y="22.2" width="20" height="3.4" rx="1.7" class="annot-bucket-paint"/>
+          </svg> Fill</button>
+        <button type="button" class="annot-tool" data-atool="clone" title="Clone stamp (S) — click to set a source point, then drag to copy that part of the page somewhere else. Alt+click re-sets the source. This is what covers a mark with the paper beside it.">Clone</button>
+        <button type="button" class="annot-tool" data-atool="history" title="History brush (Y) — brush the page as it was when you opened it back in, undoing your own edits by hand, one stroke at a time.">History</button>
+        <button type="button" class="annot-tool" data-atool="select" title="Rectangle select (M) — drag a box around an area, then fill it, move it, delete it or smart-fill it.">Select</button>
+        <button type="button" class="annot-tool" data-atool="lasso" title="Lasso select (L) — draw freehand around an area, then fill it, move it, delete it or smart-fill it.">Lasso</button>
+        <button type="button" class="annot-tool" data-atool="wand" title="Magic wand (W) — click a colour to select every pixel like it. Alt+click takes that colour across the WHOLE page. The Match ± slider widens or tightens what counts as the same colour.">Wand</button>
+        <button type="button" class="annot-tool" data-atool="move" title="Move (V) — drag inside a selection to cut those pixels out and drop them anywhere; hold Alt to copy instead of cut.">Move</button>
+        <button type="button" class="annot-tool" data-atool="rotate" title="Rotate (R) — drag on the page to turn it, Shift snaps to 15°. With an area selected it turns just that object; with nothing selected it turns the whole page, which is how you straighten a crooked scan. Straighten… traces a line along an edge and levels it for you.">Rotate</button>
+        <button type="button" class="annot-tool" data-atool="scale" title="Resize / free transform (F) — drag the eight handles round the box: corners resize both ways, edges one way, and the corner opposite the one you drag stays exactly where it is. Drag inside the box to move it. Shift swaps between keeping the shape and stretching freely.">Resize</button>
+        <button type="button" class="annot-tool" data-atool="skew" title="Skew (K) — drag sideways to slant sideways, up or down to slant up and down. For a diagram or a page photographed at an angle.">Skew</button>
+        <button type="button" class="annot-tool" data-atool="line" title="Line (U) — drag from start to end to draw a straight rule; hold Shift to snap to 45°.">Line</button>
+        <button type="button" class="annot-tool" onclick="annotPasteFromClipboard()" title="Paste a picture in from the clipboard (Ctrl+V / ⌘V) — a screenshot, a photo, a signature, a figure from another page. It lands scaled to fit with the resize handles already on it: drag a corner to size it, drag the middle to move it, then Apply.">Paste picture</button>
+        <button type="button" class="annot-tool" data-atool="text" title="Text (T) — click where the words should start, then type. Choose the face and size below; drag the label from anywhere to place it exactly.">Text</button>
+
+        <span style="width:1px; height:20px; background: var(--border-medium);"></span>
+
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:5px;" title="The colour Paint, Fill, Line and Text use.">Colour
+          <input type="color" id="annotColor" value="#e23c3c" oninput="_annotSyncControls()"
+                 style="width:34px; height:28px; padding:0; border:1px solid var(--border-medium); border-radius:var(--radius-sm); background:none; cursor:pointer;">
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:5px;" title="Brush size in image pixels — set it to 1 to paint a single pixel. The ring around your pointer on the page IS this size, drawn at the current zoom. [ and ] change it, and the mouse wheel works over the slider.">Brush
+          <input type="range" id="annotSize" min="1" max="60" value="6" oninput="_annotSyncControls()">
+          <span id="annotSizeVal" style="min-width:34px; font-variant-numeric:tabular-nums;">6&nbsp;px</span>
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:5px;" title="How close a colour has to be to count as the same one — used by the magic wand and the paint bucket. The mouse wheel works over the slider.">Match ±
+          <input type="range" id="annotTol" min="0" max="120" value="32" oninput="_annotSyncControls()">
+          <span id="annotTolVal" style="min-width:26px; font-variant-numeric:tabular-nums;">32</span>
+        </label>
+
+        <span style="width:1px; height:20px; background: var(--border-medium);"></span>
+        <button type="button" class="annot-tool" onclick="annotZoomStep(1/1.3)" title="Zoom out">−</button>
+        <span id="annotZoomVal" style="font-size:0.78rem; min-width:46px; text-align:center; font-variant-numeric:tabular-nums;">100%</span>
+        <button type="button" class="annot-tool" onclick="annotZoomStep(1.3)" title="Zoom in">+</button>
+        <button type="button" class="annot-tool" onclick="annotZoomFit()" title="Fit the whole page in view (0)">Fit</button>
+        <button type="button" class="annot-tool" onclick="annotUndo()" title="Undo the last mark (Ctrl+Z). This is the editor's own undo — it steps back through the marks made in here, not through the page operations behind it.">Undo</button>
+      </div>
+
+      <!-- The text row. It is always on show, not only while the Text tool is
+           picked, because the face and size are what somebody checks BEFORE
+           clicking on the page — and changing them restyles the label already
+           being typed, so a font can be tried on the actual words. -->
+      <div class="annot-tools" id="annotTextBar" style="margin-top:-2px;">
+        <span style="font-size:0.8rem; font-weight:700; color: var(--text-secondary);">Text:</span>
+        <select id="annotFont" onchange="annotTextSetFont(this.value)"
+                title="The face the label is drawn in. The system faces are the ones the machine already has; the rest are web faces loaded with the page. A label is drawn as pixels, so any of them can be used."
+                style="padding:5px 8px; border:1.5px solid var(--border-subtle); border-radius:var(--radius-sm); background: var(--bg-primary); font-size:0.82rem; max-width:190px;"></select>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:5px;" title="Size in page pixels, at the resolution the page was rendered at. The label on the page is drawn at exactly this size, whatever zoom you are looking at it from.">Size
+          <input type="number" id="annotFontSize" min="6" max="600" step="1" value="36" onchange="annotTextSetSize(this.value)"
+                 style="width:66px; padding:4px 6px; border:1.5px solid var(--border-subtle); border-radius:var(--radius-sm); font-size:0.82rem; font-variant-numeric:tabular-nums;">
+        </label>
+        <button type="button" class="annot-tool" id="annotFontBold" onclick="annotTextToggle('bold')" title="Bold" style="font-weight:800; min-width:34px;">B</button>
+        <button type="button" class="annot-tool" id="annotFontItalic" onclick="annotTextToggle('italic')" title="Italic" style="font-style:italic; min-width:34px;">I</button>
+        <span style="font-size:0.78rem; color: var(--text-tertiary);">Click the page, type, then press Enter. Shift+Enter starts a second line. Drag the label from anywhere to place it.</span>
+      </div>
+
+      <!-- Shown only while something is selected. -->
+      <div id="annotSelBar" style="display:none; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; margin:0 auto 12px; padding:8px 14px; border:1.5px solid var(--accent-dark); background: var(--accent-bg); border-radius:var(--radius-md); max-width:900px;">
+        <span style="font-size:0.8rem; font-weight:700; color:#8A5A12;">Selection:</span>
+        <button type="button" class="annot-tool" onclick="annotSelDelete()" title="Delete the selected area — it becomes transparent, and is flattened onto white when the touch-up is applied. With the wand, Alt+click a colour first to take it across the whole page, then press this (or the Delete key).">Delete</button>
+        <button type="button" class="annot-tool" onclick="annotSelFillColour()" title="Fill the selected area with the chosen colour">Fill colour</button>
+        <button type="button" class="annot-tool" onclick="annotSelPatchFill()" title="Fill the selected area by extending the surrounding pixels inwards — fast, and right for flat paper">Fill from surroundings</button>
+        <button type="button" class="annot-tool" onclick="annotSelSmartFill()" title="Smart fill — the same fill, then relaxed over the patch so it blends into the tone around it instead of streaking. This is the content-aware fill: it runs locally, with no AI service involved.">Smart fill</button>
+        <button type="button" class="annot-tool" data-atool="move" title="Move (V) — drag inside the selection to cut it out and drop it anywhere; hold Alt to copy instead">Move it</button>
+        <button type="button" class="annot-tool" data-atool="scale" title="Resize (F) — lift this object out and drag the handles; drag inside the box to move it">Resize it</button>
+        <button type="button" class="annot-tool" data-atool="rotate" title="Rotate (R) — lift this object out and turn it">Turn it</button>
+        <button type="button" class="annot-tool" data-atool="skew" title="Skew (K) — lift this object out and slant it">Slant it</button>
+        <button type="button" class="annot-tool" onclick="annotSelClear()" title="Deselect (Esc)">Deselect</button>
+      </div>
+
+      <!-- Shown only while a resize / rotate / skew session is open. -->
+      <div id="annotXformBar" style="display:none; flex-wrap:wrap; gap:10px 14px; align-items:center; justify-content:center; margin:0 auto 12px; padding:12px 18px; border:1.5px solid #B45309; background:#FDF4E3; border-radius:var(--radius-md); max-width:920px;">
+        <span style="font-size:0.8rem; font-weight:700; color:#92400E;">Transforming <span id="annotXformScope">the whole page</span>:</span>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="Width, as a percentage of the original. Dragging the handles round the box does the same thing.">W
+          <input type="number" id="annotXformSxNum" min="5" max="800" step="1" value="100" onchange="annotXformSetScale('sx', this.value)"
+                 style="width:64px; padding:3px 6px; border:1px solid var(--border-medium); border-radius:var(--radius-sm); font-size:0.78rem; font-variant-numeric:tabular-nums;">%
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="Height, as a percentage of the original.">H
+          <input type="number" id="annotXformSyNum" min="5" max="800" step="1" value="100" onchange="annotXformSetScale('sy', this.value)"
+                 style="width:64px; padding:3px 6px; border:1px solid var(--border-medium); border-radius:var(--radius-sm); font-size:0.78rem; font-variant-numeric:tabular-nums;">%
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="On: width and height stay in step, so the object keeps its shape. Off: stretch it freely. Holding Shift while you drag a handle swaps between the two.">
+          <input type="checkbox" id="annotXformLock" checked onchange="annotXformSetLock(this.checked)" style="width:15px; height:15px; cursor:pointer;"> Keep shape
+        </label>
+        <span id="annotXformSizePx" style="font-size:0.75rem; color:#92400E; font-variant-numeric:tabular-nums; min-width:86px;">&nbsp;</span>
+        <button type="button" class="annot-tool" onclick="annotXformFlip('x')" title="Mirror left to right">Flip ↔</button>
+        <button type="button" class="annot-tool" onclick="annotXformFlip('y')" title="Mirror top to bottom">Flip ↕</button>
+        <span style="width:1px; height:20px; background:#E0C9A0;"></span>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="Turn the object. Dragging on the page does the same thing — hold Shift there to snap to 15°. The mouse wheel works over the slider.">Turn
+          <input type="range" id="annotXformAngle" min="-180" max="180" step="0.5" value="0" oninput="annotXformSet('angle', this.value)" style="width:140px;">
+          <input type="number" id="annotXformAngleNum" min="-180" max="180" step="0.1" value="0" onchange="annotXformSet('angle', this.value)"
+                 style="width:66px; padding:3px 6px; border:1px solid var(--border-medium); border-radius:var(--radius-sm); font-size:0.78rem; font-variant-numeric:tabular-nums;">°
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="Slant sideways — the top leans one way and the bottom the other. This is what fixes a page photographed from the side.">Slant&nbsp;↔
+          <input type="range" id="annotXformSkewX" min="-60" max="60" step="0.5" value="0" oninput="annotXformSet('skewX', this.value)" style="width:104px;">
+          <span id="annotXformSkewXVal" style="min-width:34px; font-variant-numeric:tabular-nums;">0°</span>
+        </label>
+        <label style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="Slant up and down — the left edge leans one way and the right edge the other.">Slant&nbsp;↕
+          <input type="range" id="annotXformSkewY" min="-60" max="60" step="0.5" value="0" oninput="annotXformSet('skewY', this.value)" style="width:104px;">
+          <span id="annotXformSkewYVal" style="min-width:34px; font-variant-numeric:tabular-nums;">0°</span>
+        </label>
+        <span style="width:1px; height:20px; background:#E0C9A0;"></span>
+        <button type="button" class="annot-tool" onclick="annotXformNudge(-90)" title="Turn a quarter turn anticlockwise">↺ 90°</button>
+        <button type="button" class="annot-tool" onclick="annotXformNudge(90)" title="Turn a quarter turn clockwise">↻ 90°</button>
+        <button type="button" class="annot-tool" id="annotXformStraightenBtn" onclick="annotXformStraightenStart()" title="Straighten: press this, then drag a line along an edge that ought to be level — a table rule, the base of a diagram, a line of print — and the page turns to make it so.">Straighten…</button>
+        <label id="annotXformGrowWrap" style="font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;" title="On: the canvas grows so a turned page keeps all four corners, with white filling the gaps. Off: the page stays exactly the same size and the corners are cut off.">
+          <input type="checkbox" id="annotXformGrow" checked onchange="annotXformSetGrow(this.checked)" style="width:15px; height:15px; cursor:pointer;"> Grow to fit
+        </label>
+        <span style="width:1px; height:20px; background:#E0C9A0;"></span>
+        <button type="button" class="annot-tool" onclick="annotXformReset()" title="Back to the original size and 0°">Reset</button>
+        <button type="button" class="annot-tool" onclick="annotXformApply()" title="Burn the resize / turn into the page (Enter)">Apply transform</button>
+        <button type="button" class="annot-tool" onclick="annotXformCancel()" title="Put the page back as it was (Esc)">Cancel transform</button>
+      </div>
+
+      <div id="annotStage"><canvas id="annotCanvas"></canvas><canvas id="annotSelCanvas"></canvas></div>
+
+      <p class="annot-hint">
+        <strong>Erase / Paint:</strong> drag across the page — <strong>click then Shift-click</strong> joins the two points with a straight
+        stroke, and <strong>Shift-drag</strong> locks it to horizontal or vertical. <strong>Fill</strong>: click inside a shape to flood it.
+        <strong>Clone</strong>: click to set a source, then drag to stamp that area elsewhere — the cleanest way to cover a mark with the paper
+        beside it. <strong>History</strong>: brush the page as you opened it back in. <strong>Select / Lasso / Wand</strong>: mark out an area, then
+        fill it, move it, delete it or smart-fill it (Esc deselects). <strong>Move</strong>: drag inside a selection to cut it out and drop it
+        anywhere, Alt to copy. <strong>Resize / Rotate / Skew</strong>: with something selected they act on that object; with nothing selected they
+        act on the whole page, which is how a crooked scan gets straightened — <strong>Straighten…</strong> traces an edge and levels it for you.
+        Enter applies the transform, Esc cancels it.
+        <br><strong>Text:</strong> pick a face and a size, click where the words should start, and type. The box has no fill, so you can see the page
+        underneath it while you place it, and it <strong>drags from anywhere</strong> — no button to press first — with a guide across the page and
+        the exact position shown while it moves. Shift while dragging keeps it on one line. Enter finishes the label; Shift+Enter starts a second line.
+        <br><strong>Paste a picture:</strong> <kbd>Ctrl</kbd>+<kbd>V</kbd> (⌘V), or the button, drops whatever picture is on the clipboard onto the
+        page with the resize handles already on it.
+        <br><strong>Scroll</strong> over the page to zoom (down to single pixels); <strong>hold Space</strong> or the middle mouse button and drag to
+        pan; <strong>scroll over a slider</strong> to change it. Erase, Paint, Clone, History and Line draw a ring at the exact size of the mark they
+        will make, at whatever zoom you are on.
+        <br><strong>Keys:</strong> <kbd>E</kbd> erase · <kbd>B</kbd> paint · <kbd>G</kbd> fill · <kbd>S</kbd> clone · <kbd>Y</kbd> history ·
+        <kbd>M</kbd> select · <kbd>L</kbd> lasso · <kbd>W</kbd> wand · <kbd>V</kbd> move · <kbd>R</kbd> rotate · <kbd>K</kbd> skew ·
+        <kbd>F</kbd> resize · <kbd>U</kbd> line · <kbd>T</kbd> text · <kbd>[</kbd> <kbd>]</kbd> brush size · <kbd>Del</kbd> delete the selection ·
+        <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>+</kbd> <kbd>−</kbd> zoom · <kbd>0</kbd> fit · <kbd>Esc</kbd> deselect, cancel, then close
+      </p>
+    </div>
+
+    <div class="preview-footer" style="justify-content: flex-end; gap: var(--space-sm);">
+      <span style="margin-right:auto; font-size:0.78rem; color: var(--text-tertiary);">
+        Applying replaces this page's appearance with what you see here. Nothing is written to the file until you export.
+      </span>
+      <button class="secondary-button" type="button" id="annotRemoveButton" style="display:none;"
+              onclick="removeTouchUpFromEditor()"
+              title="Take the touch-up off this page and go back to the original page content. The Pages undo will bring it back.">Remove touch-up</button>
+      <button class="secondary-button" type="button" onclick="closeAnnotTool()">Cancel</button>
+      <button class="primary-button" type="button" onclick="applyAnnotTool()">Apply to page</button>
     </div>
   </div>
 </div>
@@ -2406,11 +2648,11 @@ kbd {
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
 </div>
 
-<div class="version-badge">Polymath PDF Studio v2.0.0</div>
+<div class="version-badge">Polymath PDF Studio v2.1.0</div>
 
 <script>
 /* ==========================================================================
-   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.0.0
+   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.1.0
    ==========================================================================
    Deliberately verbose and unminified so it stays easy to read and extend.
 
@@ -2433,8 +2675,9 @@ kbd {
      16. TEXT MODE — find and replace
      17. Export and build pipeline
      18. Mode switching
-     19. Keyboard shortcuts
-     20. Event wiring and boot
+     19. TOUCH UP — the raster editor for one page
+     20. Keyboard shortcuts
+     21. Event wiring and boot
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -2685,7 +2928,7 @@ function rgbBytesToHex(redByte, greenByte, blueByte) {
 
 /* Returns a detached duplicate of a page descriptor with a brand new id. */
 function clonePageDescriptor(pageEntry) {
-  return {
+  const copy = {
     uniqueId: createUniqueId('page'),
     sourceId: pageEntry.sourceId,
     sourcePageIndex: pageEntry.sourcePageIndex,
@@ -2695,6 +2938,13 @@ function clonePageDescriptor(pageEntry) {
     pointHeight: pageEntry.pointHeight,
     isBlank: pageEntry.isBlank === true
   };
+  /* A touch-up is part of what the page LOOKS like, so duplicating, copying or
+     pasting a page has to bring it along — a duplicate that quietly reverted to
+     the untouched original would be the same page twice by every other measure
+     and wrong by the only one that matters. The raster object is shared rather
+     than deep-copied: it is never mutated in place, only replaced. */
+  if (pageEntry.touchUp) { copy.touchUp = pageEntry.touchUp; }
+  return copy;
 }
 
 function findPageIndexById(uniqueId) {
@@ -2928,12 +3178,31 @@ async function importFiles(fileList, insertAtIndex) {
    -------------------------------------------------------------------------- */
 
 function buildThumbnailCacheKey(pageEntry) {
-  if (pageEntry.isBlank) { return 'blank'; }
   const totalRotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+  /* The touch-up id is IN the key. Without it the cache would keep serving the
+     pre-touch-up render of the same source page, and the change would appear
+     only after a reload — for a raster edit, that reads as "it did nothing". */
+  if (pageEntry.touchUp) { return 'touchup::' + pageEntry.touchUp.id + '::' + totalRotation; }
+  if (pageEntry.isBlank) { return 'blank'; }
   return pageEntry.sourceId + '::' + pageEntry.sourcePageIndex + '::' + totalRotation;
 }
 
 async function renderThumbnailForPage(pageEntry) {
+  /* A touched-up page IS its raster — that is what will export — so the
+     thumbnail is drawn from it, turned to face the way the page faces now. */
+  if (pageEntry.touchUp) {
+    const facing = await touchUpFacingCanvas(pageEntry);
+    const scaled = document.createElement('canvas');
+    const shrink = Math.min(1, THUMBNAIL_RENDER_WIDTH / Math.max(1, facing.width));
+    scaled.width = Math.max(1, Math.round(facing.width * shrink));
+    scaled.height = Math.max(1, Math.round(facing.height * shrink));
+    const scaledContext = scaled.getContext('2d');
+    scaledContext.fillStyle = '#FFFFFF';
+    scaledContext.fillRect(0, 0, scaled.width, scaled.height);
+    scaledContext.drawImage(facing, 0, 0, scaled.width, scaled.height);
+    return scaled.toDataURL('image/jpeg', 0.82);
+  }
+
   const sourceRecord = sourceLibrary.get(pageEntry.sourceId);
   if (!sourceRecord) { return null; }
 
@@ -3773,6 +4042,13 @@ const ICON_EDIT_TEXT =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
 
+/* A brush, for the raster editor. */
+const ICON_TOUCH_UP =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M15.5 4.5l4 4"></path>' +
+  '<path d="M17 3l4 4-9.5 9.5-5 1 1-5L17 3z"></path>' +
+  '<path d="M6 17c-1.6.6-2 2.2-2 4 1.8 0 3.4-.4 4-2"></path></svg>';
+
 const ICON_TRASH =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M3 6h18"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
@@ -3801,7 +4077,7 @@ function renderPageGrid() {
     const thumbnailFrame = document.createElement('div');
     thumbnailFrame.className = 'thumbnail-frame';
 
-    if (pageEntry.isBlank) {
+    if (pageEntry.isBlank && !pageEntry.touchUp) {
       const blankMarker = document.createElement('div');
       blankMarker.className = 'blank-page-marker';
       blankMarker.textContent = 'Blank';
@@ -3853,6 +4129,14 @@ function renderPageGrid() {
         action: 'edit-text',
         style: ' is-edit'
       },
+      {
+        label: pageEntry.touchUp
+          ? 'Touch up this page again (erase, paint, clone, label)'
+          : 'Touch up this page — erase, paint, clone, select, straighten, label',
+        icon: ICON_TOUCH_UP,
+        action: 'touch-up',
+        style: ''
+      },
       { label: 'Duplicate', icon: ICON_DUPLICATE, action: 'duplicate', style: '' },
       { label: 'Preview', icon: ICON_PREVIEW, action: 'preview', style: '' },
       { label: 'Delete', icon: ICON_TRASH, action: 'delete', style: ' is-danger' }
@@ -3884,6 +4168,14 @@ function renderPageGrid() {
       rotationTag.className = 'rotation-tag';
       rotationTag.textContent = pageEntry.userRotation + '°';
       cardMeta.appendChild(rotationTag);
+    }
+
+    if (pageEntry.touchUp) {
+      const touchUpMarker = document.createElement('span');
+      touchUpMarker.className = 'edit-marker is-touchup';
+      touchUpMarker.textContent = 'touched up';
+      touchUpMarker.title = 'This page exports as the touched-up picture. Open Touch up again to keep working on it, or use the Pages undo to take it off.';
+      cardMeta.appendChild(touchUpMarker);
     }
 
     const editCount = getEditsForPage(pageEntry.uniqueId).length;
@@ -4002,6 +4294,15 @@ function updateStatusBar() {
   } else {
     editMetric.style.display = 'none';
   }
+
+  const touchedUp = pageList.filter(function (pageEntry) { return !!pageEntry.touchUp; }).length;
+  const touchUpMetric = getElement('touchUpMetric');
+  if (touchedUp > 0) {
+    touchUpMetric.style.display = 'inline-flex';
+    getElement('touchUpCountText').textContent = String(touchedUp);
+  } else {
+    touchUpMetric.style.display = 'none';
+  }
 }
 
 function updateToolbarAvailability() {
@@ -4016,6 +4317,10 @@ function updateToolbarAvailability() {
   ].forEach(function (buttonId) {
     getElement(buttonId).disabled = !hasSelection;
   });
+
+  /* The touch-up editor is one page at a time: it renders that page to pixels
+     and hands it a canvas, which has no sensible meaning for a run of twelve. */
+  getElement('touchUpButton').disabled = selectedPageIds.length !== 1;
 
   getElement('pasteButton').disabled = !hasClipboard;
   getElement('downloadAllButton').disabled = !hasPages;
@@ -4175,6 +4480,20 @@ async function renderPreviewCanvas() {
   getElement('previewTitle').textContent = sourceRecord
     ? sourceRecord.displayName + ' — source page ' + (pageEntry.sourcePageIndex + 1)
     : 'Blank page — ' + describePageSizeInMillimetres(pageEntry);
+
+  /* A touched-up page previews as its raster — the preview is meant to answer
+     "what will come out of the printer", and for this page that is the picture. */
+  if (pageEntry.touchUp) {
+    const facing = await touchUpFacingCanvas(pageEntry);
+    if (currentToken !== previewRenderToken) { return; }
+    canvasElement.width = facing.width;
+    canvasElement.height = facing.height;
+    drawingContext.fillStyle = '#FFFFFF';
+    drawingContext.fillRect(0, 0, canvasElement.width, canvasElement.height);
+    drawingContext.drawImage(facing, 0, 0);
+    getElement('previewTitle').textContent = 'Page ' + (previewPageIndex + 1) + ' — touched up';
+    return;
+  }
 
   if (pageEntry.isBlank || !sourceRecord) {
     const displayed = displayedPageSize(pageEntry);
@@ -4711,6 +5030,18 @@ async function openEditorPage(pageIndex) {
   await pdfjsPage.render({ canvasContext: drawingContext, viewport: viewport }).promise;
   if (currentToken !== editorRenderToken) { return; }
 
+  /* A touched-up page is laid over the render, because that is what the page
+     looks like now and what will print. The RUNS underneath are still read
+     from the real text objects and can still be rewritten — a text edit is
+     drawn over the raster at export, in that order, for exactly this reason.
+     What it does mean is that a run erased with the brush is still listed
+     here, so the hint below says so rather than leaving it to be discovered. */
+  if (pageEntry.touchUp) {
+    const facing = await touchUpFacingCanvas(pageEntry);
+    if (currentToken !== editorRenderToken) { return; }
+    drawingContext.drawImage(facing, 0, 0, canvasElement.width, canvasElement.height);
+  }
+
   /* --- Build the run geometry table for this page --- */
   const textContent = await loadTextContentForPage(pageEntry);
   if (currentToken !== editorRenderToken) { return; }
@@ -4727,7 +5058,11 @@ async function openEditorPage(pageIndex) {
     getElement('canvasHint').textContent =
       'Click any line of text to rewrite it. Shift-click a second run on the same line to ' +
       'edit them together. The original is covered with the sampled paper colour, then the ' +
-      'new words are drawn at the same baseline.';
+      'new words are drawn at the same baseline.' +
+      (pageEntry.touchUp
+        ? ' This page has been touched up, so what you see is the picture — the text runs ' +
+          'listed below it are still the real ones and can still be rewritten on top.'
+        : '');
   }
 
   buildTextOverlay();
@@ -5912,11 +6247,40 @@ async function buildPdfBytes(pagesToBuild, options) {
     await waitForMilliseconds(0);
   }
 
-  /* --- Stage two: burn in the text edits ---
-     Pages were added strictly in order, so index i of the output corresponds
+  /* Pages were added strictly in order, so index i of the output corresponds
      to index i of pagesToBuild. */
   const assembledPages = outputDocument.getPages();
 
+  /* --- Stage one and a half: lay each touch-up over its page ---
+     The raster is stored in the page's own UNROTATED orientation, which is the
+     space getSize() and drawImage() work in, so it goes on at (0,0) covering
+     the whole page and the page's /Rotate is applied over the top by the
+     viewer — exactly as it is for the original content underneath.
+
+     It goes on BEFORE the text edits deliberately: a text edit is a live,
+     re-editable object and has to stay on top of the pixels, or covering a
+     line on a touched-up page would silently stop working. */
+  for (let pageIndex = 0; pageIndex < pagesToBuild.length; pageIndex += 1) {
+    const raster = pagesToBuild[pageIndex].touchUp;
+    if (!raster) { continue; }
+
+    const outputPage = assembledPages[pageIndex];
+    if (!outputPage) { continue; }
+
+    try {
+      const embeddedRaster = await outputDocument.embedPng(raster.dataUrl);
+      const pageSize = outputPage.getSize();
+      outputPage.drawImage(embeddedRaster, {
+        x: 0, y: 0, width: pageSize.width, height: pageSize.height
+      });
+    } catch (rasterError) {
+      console.error('Touch-up embed failed', rasterError);
+      showToast('A touch-up on page ' + (pageIndex + 1) + ' could not be embedded and was left off.', 'error');
+    }
+    await waitForMilliseconds(0);
+  }
+
+  /* --- Stage two: burn in the text edits --- */
   for (let pageIndex = 0; pageIndex < pagesToBuild.length; pageIndex += 1) {
     const pageEdits = getEditsForPage(pagesToBuild[pageIndex].uniqueId);
     if (pageEdits.length === 0) { continue; }
@@ -6179,7 +6543,2552 @@ function stepEditorPage(offset) {
 }
 
 /* ==========================================================================
-   19. KEYBOARD SHORTCUTS
+   19. TOUCH UP — A FULL RASTER EDITOR FOR ONE PAGE
+   ==========================================================================
+   Text mode covers and redraws real text objects. This is the other half: a
+   page rendered to pixels, so anything on it can be erased, painted, cloned,
+   selected, moved, resized, turned, straightened and labelled — the things a
+   scan needs and a text object model cannot express.
+
+   The whole editor is ported wholesale from the Science app's "Touch up &
+   label" tool (polymathlc/cer, `_annot*` in app.js), tool for tool, so a fix
+   made in either app can be carried across to the other. What is NEW here is
+   the destination — a PDF page rather than a question's image block — and the
+   text tool, which grew a font picker, free dragging and see-through boxes.
+
+   WHAT IS STORED. Applying writes ONE png onto the page descriptor
+   (`pageEntry.touchUp`), held in the page's own UNROTATED orientation, so it
+   lines up with pdf-lib's page space whatever the page is rotated to on
+   screen. Nothing is baked into the file until export, exactly like a text
+   edit, and the page-level undo stack carries it because a descriptor is only
+   ever REPLACED, never mutated in place.
+   ========================================================================== */
+(function injectAnnotStyles() {
+  const css = `
+  .annot-tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; margin-bottom:12px; }
+  .annot-tool { padding:6px 12px; border:1.5px solid var(--border-subtle); background:var(--bg-primary); border-radius:var(--radius-sm); cursor:pointer; font-size:0.82rem; color:var(--text-primary); font-family:inherit; }
+  .annot-tool:hover { border-color:var(--accent-dark); }
+  .annot-tool.active { border-color:var(--accent-dark); background:var(--accent-bg); color:#8A5A12; font-weight:700; }
+  /* The paint bucket shows what it will pour: the strip along its base (and the
+     drip) are the exact colour currently chosen, updated live with the picker. */
+  .annot-bucket { width:17px; height:18px; vertical-align:-4px; margin-right:2px; overflow:visible; }
+  .annot-bucket-paint { fill:var(--annot-paint,#e23c3c); stroke:rgba(0,0,0,0.28); stroke-width:0.7; }
+  .annot-hint kbd { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.72em; padding:1px 5px; border:1px solid var(--border-subtle);
+    border-bottom-width:2px; border-radius:4px; background:var(--bg-primary); white-space:nowrap; }
+  .annot-hint { font-size:0.78rem; line-height:1.65; color:var(--text-secondary); text-align:left; max-width:1080px; margin:12px auto 0; }
+  #annotStage.moving #annotCanvas { cursor:move; }
+  #annotStage { position:relative; display:block; margin:0 auto; width:86vw; max-width:1080px; height:54vh; overflow:hidden; line-height:0; background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); touch-action:none; }
+  /* The canvas keeps its alpha, so a sprite that has already had its background
+     removed is edited transparent. This grey check behind it is how you can SEE
+     which parts are empty — a card-art slot is often a cut-out. It is only ever
+     visible where the picture is transparent, so an ordinary opaque question
+     image looks exactly as it always did. (This is the editor's own backdrop,
+     not something painted into a picture — the chequerboard an image model
+     paints is a different thing entirely, and still banned in prompts.) */
+  #annotCanvas { position:absolute; top:0; left:0; transform-origin:0 0; touch-action:none; cursor:crosshair; image-rendering:auto;
+    background-color:#fbfbfb;
+    background-image:linear-gradient(45deg,#dfe2df 25%,transparent 25%,transparent 75%,#dfe2df 75%),linear-gradient(45deg,#dfe2df 25%,transparent 25%,transparent 75%,#dfe2df 75%);
+    background-size:16px 16px; background-position:0 0,8px 8px; }
+  #annotSelCanvas { position:absolute; top:0; left:0; transform-origin:0 0; pointer-events:none; z-index:4; }
+  #annotCanvas.pixelated { image-rendering:pixelated; image-rendering:crisp-edges; }
+  #annotStage.panning, #annotStage.panning #annotCanvas { cursor:grabbing; }
+  #annotStage.canpan #annotCanvas { cursor:grab; }
+  /* ---- The text label -----------------------------------------------------
+     A label is positioned in CANVAS pixels and laid out from them on every
+     zoom and pan, so it sits on the picture rather than on the window — which
+     is what makes "what you see is what gets drawn" true at any zoom.
+     Two rules matter more than they look:
+       • the box has NO background of its own, only a hairline dashed rule, so
+         whatever it is being placed over stays visible underneath it. An
+         opaque box hides the very thing you are lining the words up with.
+       • padding and border are ZERO and the rule is drawn with the CSS
+         outline property, which takes no layout space — so its top-left IS the
+         top-left of the text, and burning it onto the canvas is one fillText
+         at the same point rather than a guess at the border width. */
+  .annot-textbox { position:absolute; z-index:5; }
+  .annot-textbox-input { display:block; margin:0; padding:0; border:0; background:transparent; outline:1px dashed rgba(120,120,120,0.85);
+    outline-offset:2px; white-space:pre; min-width:6px; min-height:1em; cursor:text; caret-color:currentColor; }
+  .annot-textbox.dragging .annot-textbox-input { cursor:move; outline-style:solid; }
+  .annot-textbox-handle { position:absolute; left:0; cursor:move; user-select:none; touch-action:none; background:var(--accent-dark); color:#4A3005;
+    font-size:11px; font-weight:700; line-height:1; padding:3px 7px; border-radius:var(--radius-sm) var(--radius-sm) 0 0; white-space:nowrap; }
+  /* Placement guides: two hairlines through the label's own origin, drawn
+     across the whole stage while it is being dragged, so a caption can be
+     lined up with a rule, a column edge or the label above it. */
+  .annot-guide { position:absolute; z-index:4; pointer-events:none; background:rgba(220,38,38,0.75); box-shadow:0 0 0 1px rgba(255,255,255,0.75); }
+  .annot-guide.h { left:0; right:0; height:1px; }
+  .annot-guide.v { top:0; bottom:0; width:1px; }
+  .annot-guide-tag { position:absolute; z-index:8; pointer-events:none; background:rgba(26,26,26,0.88); color:#fff; font-size:11px; font-weight:700;
+    line-height:1; padding:4px 7px; border-radius:var(--radius-sm); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  #annotCloneSrc { position:absolute; z-index:6; width:16px; height:16px; margin:-8px 0 0 -8px; border-radius:50%; border:2px solid #2d6ca8; background:rgba(37,99,235,0.18); box-shadow:0 0 0 1px rgba(255,255,255,0.8); pointer-events:none; }
+  #annotCloneSrc::before, #annotCloneSrc::after { content:''; position:absolute; background:#2d6ca8; }
+  #annotCloneSrc::before { left:6px; top:1px; width:2px; height:12px; }
+  #annotCloneSrc::after { top:6px; left:1px; height:2px; width:12px; }
+  /* The brush cursor: a ring the exact size of the mark about to be made, at
+     the current zoom. Black ring inside a white one, so it stays visible on a
+     white page and on black card art alike. */
+  #annotBrushRing { position:absolute; z-index:7; box-sizing:border-box; border-radius:50%; pointer-events:none; display:none;
+    border:1px solid rgba(0,0,0,0.9); box-shadow:0 0 0 1px rgba(255,255,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.9); }
+  /* Under a few screen pixels a circle is just a blob — draw a crosshair, the
+     way every paint program does for a tiny brush. */
+  #annotBrushRing.tiny { border-color:transparent; box-shadow:none; }
+  #annotBrushRing.tiny::before, #annotBrushRing.tiny::after { content:''; position:absolute; background:rgba(0,0,0,0.85); box-shadow:0 0 0 1px rgba(255,255,255,0.9); }
+  #annotBrushRing.tiny::before { left:50%; top:50%; width:1px; height:11px; margin:-5.5px 0 0 -0.5px; }
+  #annotBrushRing.tiny::after { left:50%; top:50%; height:1px; width:11px; margin:-0.5px 0 0 -5.5px; }
+  #annotBrushHud { position:absolute; z-index:8; pointer-events:none; opacity:0; transition:opacity 0.16s ease; transform:translateX(-50%);
+    background:rgba(26,26,26,0.88); color:#fff; font-size:11px; font-weight:700; line-height:1;
+    padding:5px 8px; border-radius:6px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  #annotBrushHud.show { opacity:1; }`;
+  const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
+})();
+
+let _annot = null;
+
+/** Load a data URL / object URL into an <img> that has finished decoding. */
+function _loadImageEl(src) {
+  return new Promise(function (resolve, reject) {
+    const img = new Image();
+    img.onload = function () { resolve(img); };
+    img.onerror = function () { reject(new Error('could not load the image')); };
+    img.src = src;
+  });
+}
+
+/* ---- The fonts the text tool offers --------------------------------------
+   A label is burned onto pixels, not written as a PDF text object, so ANY
+   face the browser can draw is available here — which is the whole reason the
+   list can be this long. Two kinds sit side by side and the difference
+   matters:
+     • the SYSTEM faces (Helvetica, Century Gothic, Arial, Times…) are the
+       ones a school machine already has, so they cost nothing and are what
+       most worksheets are already set in. Each carries a real fallback chain,
+       because "Century Gothic" does not exist on Linux (URW Gothic does) and
+       "Helvetica" quietly means Arial on Windows.
+     • the WEB faces (Roboto, Open Sans, Poppins…) come from the one Google
+       Fonts request in the head, which is loaded non-blocking so it can never
+       hold up first paint.
+   `_annotEnsureFont` waits for the face to be ready before anything is drawn
+   with it — without that, the first label set in Roboto is burned in using
+   the fallback and there is no way to tell afterwards. */
+const ANNOT_FONTS = [
+  { label: 'Helvetica', css: "Helvetica, 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif" },
+  { label: 'Arial', css: "Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', sans-serif" },
+  { label: 'Roboto', css: "'Roboto', Arial, sans-serif" },
+  { label: 'Century Gothic', css: "'Century Gothic', CenturyGothic, AppleGothic, 'URW Gothic', 'Questrial', 'Trebuchet MS', sans-serif" },
+  { label: 'Questrial', css: "'Questrial', 'Century Gothic', sans-serif" },
+  { label: 'Open Sans', css: "'Open Sans', 'Segoe UI', Arial, sans-serif" },
+  { label: 'Lato', css: "'Lato', 'Segoe UI', Arial, sans-serif" },
+  { label: 'Montserrat', css: "'Montserrat', 'Century Gothic', Arial, sans-serif" },
+  { label: 'Poppins', css: "'Poppins', 'Century Gothic', Arial, sans-serif" },
+  { label: 'Oswald', css: "'Oswald', 'Arial Narrow', Impact, sans-serif" },
+  { label: 'Verdana', css: "Verdana, Geneva, 'DejaVu Sans', sans-serif" },
+  { label: 'Tahoma', css: "Tahoma, Geneva, Verdana, sans-serif" },
+  { label: 'Trebuchet MS', css: "'Trebuchet MS', Tahoma, sans-serif" },
+  { label: 'Times New Roman', css: "'Times New Roman', Times, 'Liberation Serif', serif" },
+  { label: 'Georgia', css: "Georgia, 'Times New Roman', serif" },
+  { label: 'Merriweather', css: "'Merriweather', Georgia, serif" },
+  { label: 'Playfair Display', css: "'Playfair Display', Georgia, serif" },
+  { label: 'Garamond', css: "Garamond, 'EB Garamond', 'Palatino Linotype', Palatino, serif" },
+  { label: 'Palatino', css: "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif" },
+  { label: 'Courier New', css: "'Courier New', Courier, 'Liberation Mono', monospace" },
+  { label: 'Roboto Mono', css: "'Roboto Mono', 'Courier New', monospace" },
+  { label: 'Comic Sans MS', css: "'Comic Sans MS', 'Comic Neue', cursive" },
+  { label: 'Impact', css: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" }
+];
+const ANNOT_TEXT_LINE_HEIGHT = 1.25;   // shared by the live box and the burn-in
+const ANNOT_TEXT_MIN_PX = 6;
+
+/** The CSS shorthand for a text setting, used for the live box AND the canvas. */
+function _annotFontString(text, sizePx) {
+  return (text.italic ? 'italic ' : '') + (text.bold ? '700 ' : '400 ') +
+    Math.max(1, Math.round(sizePx * 100) / 100) + 'px ' + text.family;
+}
+
+/* A label wants to be readable on the page it is written on, so the starting
+   size is a fraction of the raster rather than a fixed number of pixels — 12px
+   on a 2200px scan is a speck. */
+function _annotDefaultTextSize(canvas) {
+  return Math.max(12, Math.round((canvas.height || 800) / 42));
+}
+
+/* Wait for the chosen face before drawing with it. A web font that has not
+   loaded silently falls back, and a label burned into pixels cannot be
+   re-faced afterwards. Failure is not fatal — the fallback still draws. */
+function _annotEnsureFont(text, sizePx) {
+  if (!document.fonts || !document.fonts.load) { return Promise.resolve(); }
+  try { return document.fonts.load(_annotFontString(text, sizePx), 'Ag').catch(function () {}); }
+  catch (loadError) { return Promise.resolve(); }
+}
+
+// The editor itself, opened on a picture from ANYWHERE. `target` says where
+// Apply writes it back to — here that is always a page of the open document
+// (`pageId`), and adding another destination means adding a branch in
+// applyAnnotTool rather than forking the tool.
+function _annotOpenSrc(srcP, target, title) {
+  srcP.then(_loadImageEl).then(img => {
+    const canvas = document.getElementById('annotCanvas');
+    const cap = 2700; // keep the working canvas (and undo snapshots) sane
+    const scale = Math.min(1, cap / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+    canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const selCanvas = document.getElementById('annotSelCanvas');
+    if (selCanvas) { selCanvas.width = canvas.width; selCanvas.height = canvas.height; }
+    // The picture exactly as it was opened, kept for the history brush to paint
+    // back from. It is never written to, so "the original" stays the original
+    // however many edits are stacked on top.
+    const orig = document.createElement('canvas');
+    orig.width = canvas.width; orig.height = canvas.height;
+    orig.getContext('2d').drawImage(canvas, 0, 0);
+    _annot = { pageId: target.pageId || null, pageRotation: target.pageRotation || 0,
+      // WHAT ERASE LEAVES BEHIND. A page is paper, so erasing a word means
+      // painting it white — the default here. The toolbar button flips it to a
+      // real hole for the times a cut-out is what is wanted; anything still
+      // transparent at Apply is flattened onto white, because a PDF page is
+      // never see-through.
+      eraseTo: 'white',
+      canvas, ctx, tool: 'erase', color: '#e23c3c', size: 6, tol: 32, drawing: false, history: [], start: null, snap: null,
+      zoom: 1, fit: 1, panX: 0, panY: 0, space: false, panning: false, cloneSrc: null, cloneSnap: null, cloneOff: null,
+      anchor: null, sel: null, selPts: null, selCanvas, origSnap: orig, float: null, xform: null, xfStart: null,
+      // The text tool's own settings, kept on the session so every new label
+      // arrives in the face, size and weight the last one was set to.
+      text: { family: ANNOT_FONTS[0].css, label: ANNOT_FONTS[0].label, size: _annotDefaultTextSize(canvas), bold: false, italic: false },
+      // Where the pointer is, in STAGE coordinates, and how long the size badge
+      // stays up after a change — see the brush cursor below.
+      ptr: null, ptrIn: false, hudUntil: 0, hudTimer: null };
+    _annotSelSyncBar();
+    if (!_annotAntsRunning) _annotAntsLoop();
+    _annotSyncControls();
+    _annotSyncTextBar();
+    _annotBindSliderWheel();
+    _annotSetTool('erase');
+    _annotSyncEraseTo();
+    const head = document.getElementById('annotTitle');
+    if (head) head.textContent = title || 'Touch up';
+    document.getElementById('annotOverlay').classList.add('is-open');
+    // Fit the image after the overlay is visible so the stage has real dimensions.
+    requestAnimationFrame(() => { annotZoomFit(); });
+    _annotBindZoomListeners();
+  }).catch(e => { console.warn('open annot', e); showToast('Could not open the touch-up editor for this page.', 'error'); });
+}
+// Does the eraser CUT rather than paint white?
+function annotEraseClears() { return !!(_annot && _annot.eraseTo === 'clear'); }
+function annotToggleEraseTo() {
+  if (!_annot) return;
+  _annot.eraseTo = annotEraseClears() ? 'white' : 'clear';
+  _annotSyncEraseTo();
+  showToast(annotEraseClears()
+    ? '🩹 Erase now cuts the picture away — transparent, not white'
+    : '🩹 Erase now paints white, for erasing words off paper', 'info');
+}
+function _annotSyncEraseTo() {
+  const b = document.getElementById('annotEraseTo');
+  if (!b) return;
+  const clear = annotEraseClears();
+  b.innerHTML = clear ? '▨ Erase to: <b>transparent</b>' : '⬜ Erase to: <b>white</b>';
+  b.classList.toggle('on', clear);
+  b.title = clear
+    ? 'Erase, the paint bucket and Delete all cut the picture away to nothing — the right thing for card art, sprites and effect frames, which stand on a transparent background. Click to paint white instead.'
+    : 'Erase and the paint bucket paint WHITE — the right thing for rubbing a word off a scanned question. Click to cut the picture away to transparent instead.';
+}
+// Put the canvas into the right mode for the tool about to draw, and set the
+// colour. `destination-out` is what turns a brush stroke into a real hole
+// instead of a white one; _annotUp puts the mode back.
+function _annotPaintCompose(ctx) {
+  const clear = _annot.tool === 'erase' && annotEraseClears();
+  ctx.strokeStyle = clear ? '#000000' : (_annot.tool === 'erase' ? '#ffffff' : _annot.color);
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.globalCompositeOperation = clear ? 'destination-out' : 'source-over';
+  return clear;
+}
+function _annotResetCompose() {
+  if (_annot && _annot.ctx) _annot.ctx.globalCompositeOperation = 'source-over';
+}
+function _annotSyncControls() {
+  const col = document.getElementById('annotColor'), sz = document.getElementById('annotSize'), tl = document.getElementById('annotTol');
+  const _sizeWas = _annot ? _annot.size : 0;
+  if (_annot) {
+    if (col) _annot.color = col.value || _annot.color;
+    if (sz) _annot.size = parseInt(sz.value, 10) || _annot.size;
+    if (tl) { const t = parseInt(tl.value, 10); _annot.tol = isNaN(t) ? _annot.tol : t; }
+    const lbl = document.getElementById('annotSizeVal');
+    if (lbl) lbl.innerHTML = _annot.size + '&nbsp;px';
+    const tlbl = document.getElementById('annotTolVal');
+    if (tlbl) tlbl.textContent = _annot.tol;
+    // Every route to the size — the slider, the wheel, [ and ] — lands here, so
+    // this is the one place that has to say what it did on the picture itself.
+    if (_annot.size !== _sizeWas) _annotBrushFlash(); else _annotUpdateBrushRing();
+  }
+  // A label being typed follows the colour picker too — the colour is part of
+  // what the words will look like, so it belongs on the live box, not only on
+  // the next one.
+  if (_annot) annotTextRestyleLive();
+  // The bucket icon always shows the colour it would pour, open tool or not.
+  const bucket = document.querySelector('.annot-tool[data-atool="fill"]');
+  if (bucket && col) bucket.style.setProperty('--annot-paint', col.value || '#e23c3c');
+}
+// Nudge the brush size from a key or the mouse wheel, keeping the slider,
+// the label and _annot in step.
+function _annotStepSize(delta) {
+  const sz = document.getElementById('annotSize');
+  if (!sz) return;
+  const min = parseInt(sz.min, 10) || 1, max = parseInt(sz.max, 10) || 60;
+  sz.value = String(Math.min(max, Math.max(min, (parseInt(sz.value, 10) || 1) + delta)));
+  _annotSyncControls();
+}
+function _annotStepTol(delta) {
+  const tl = document.getElementById('annotTol');
+  if (!tl) return;
+  const min = parseInt(tl.min, 10) || 0, max = parseInt(tl.max, 10) || 120;
+  tl.value = String(Math.min(max, Math.max(min, (parseInt(tl.value, 10) || 0) + delta)));
+  _annotSyncControls();
+}
+// Scroll over either slider to change it — the wheel is the natural gesture for
+// a value you are adjusting by feel, and the page must not scroll underneath.
+function _annotBindSliderWheel() {
+  const xstep = field => d => { const x = _annot && _annot.xform; if (x) annotXformSet(field, (x[field] || 0) + d); };
+  // The size boxes step in percent, so a wheel over them resizes by feel too.
+  const sstep = field => d => {
+    const x = _annot && _annot.xform; if (!x) return;
+    const cur = Math.abs(field === 'sx' ? _annotXformSx(x) : _annotXformSy(x)) * 100;
+    annotXformSetScale(field, cur + d);
+  };
+  [['annotSize', _annotStepSize, 1], ['annotTol', _annotStepTol, 4],
+   ['annotXformAngle', xstep('angle'), 1], ['annotXformSkewX', xstep('skewX'), 1], ['annotXformSkewY', xstep('skewY'), 1],
+   ['annotXformSxNum', sstep('sx'), 1], ['annotXformSyNum', sstep('sy'), 1]
+  ].forEach(([id, step, mult]) => {
+    const el = document.getElementById(id);
+    if (!el || el._wheelBound) return;
+    el._wheelBound = true;
+    el.addEventListener('wheel', e => {
+      e.preventDefault(); e.stopPropagation();
+      step((e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? mult * 5 : mult));
+    }, { passive: false });
+  });
+}
+// ---- Zoom & pan (Photoshop-style): the canvas is transformed inside a fixed
+// viewport; scroll zooms toward the cursor, Space/middle-drag pans. ----
+const ANNOT_MAX_DISPLAY = 40;   // up to 40 screen px per image pixel — see individual pixels
+function _annotDisplayScale() { return _annot ? _annot.fit * _annot.zoom : 1; }
+function _annotUpdateTransform() {
+  if (!_annot) return;
+  const c = _annot.canvas, s = _annotDisplayScale();
+  c.style.transform = 'translate(' + _annot.panX + 'px,' + _annot.panY + 'px) scale(' + s + ')';
+  c.classList.toggle('pixelated', s >= 3);   // crisp pixels once magnified
+  if (_annot.selCanvas) _annot.selCanvas.style.transform = c.style.transform;   // marching ants ride along
+  const zl = document.getElementById('annotZoomVal');
+  if (zl) zl.textContent = Math.round(s * 100) + '%';
+  _annotUpdateCloneMarker();   // the source pin rides along with zoom / pan
+  _annotUpdateBrushRing();     // ... and so does the brush ring: it is drawn at the zoomed size
+  _annotLayoutTextBoxes();     // ... and so do the text labels, which live in canvas pixels
+}
+// A small pin marking the clone-stamp source point, kept aligned under zoom/pan.
+function _annotUpdateCloneMarker() {
+  const st = document.getElementById('annotStage'); if (!st) return;
+  let m = document.getElementById('annotCloneSrc');
+  const show = _annot && _annot.tool === 'clone' && _annot.cloneSrc;
+  if (!show) { if (m) m.style.display = 'none'; return; }
+  if (!m) { m = document.createElement('div'); m.id = 'annotCloneSrc'; st.appendChild(m); }
+  const s = _annotDisplayScale();
+  m.style.display = 'block';
+  m.style.left = (_annot.panX + _annot.cloneSrc.x * s) + 'px';
+  m.style.top = (_annot.panY + _annot.cloneSrc.y * s) + 'px';
+}
+// ---- The brush cursor — what you are about to paint with, drawn on the picture
+// -----------------------------------------------------------------------------
+// A brush whose size you can only read as a number on a slider is a brush you
+// are guessing with: "12 px" at 40% zoom is a quarter of the mark "12 px" makes
+// at 400%. So every size-driven tool shows its real footprint under the pointer,
+// at the current zoom, the way Photoshop does — erase, paint, clone, history and
+// the line tool, whose thickness IS the brush size. The tools that take no size
+// (fill, wand, select, lasso, move, the transforms, text) keep their own cursor
+// and deliberately show no ring; a circle round a paint bucket would be a lie.
+const ANNOT_RING_TOOLS = { erase: 1, paint: 1, clone: 1, history: 1, line: 1 };
+const ANNOT_RING_TINY = 7;     // under this many screen px a circle is a blob: draw a crosshair instead
+const ANNOT_HUD_MS = 1200;     // how long the "12 px" badge stays up after a size change
+// The ring and its badge live in the STAGE, like the clone-source pin — not on
+// the canvas, which is scaled and panned underneath them.
+function _annotRingEls(make) {
+  const st = document.getElementById('annotStage');
+  if (!st) return null;
+  let ring = document.getElementById('annotBrushRing'), hud = document.getElementById('annotBrushHud');
+  if (!ring && make) { ring = document.createElement('div'); ring.id = 'annotBrushRing'; st.appendChild(ring); }
+  if (!hud && make) { hud = document.createElement('div'); hud.id = 'annotBrushHud'; st.appendChild(hud); }
+  return ring ? { st, ring, hud } : null;
+}
+function _annotBrushRingVisible() {
+  if (!_annot || !ANNOT_RING_TOOLS[_annot.tool]) return false;
+  if (_annot.space || _annot.panning) return false;                 // pan mode has its own hand cursor
+  // Mid-stroke it stays up even if the drag has run off the edge; otherwise it
+  // follows the pointer, or shows briefly while the size is being changed.
+  return _annot.drawing || _annot.ptrIn || _annot.hudUntil > Date.now();
+}
+// Remember where the pointer is, in stage coordinates, and redraw the ring.
+function _annotTrackPointer(e) {
+  if (!_annot) return;
+  const box = _annotStageBox();
+  const x = e.clientX - box.left, y = e.clientY - box.top;
+  // A text label inside the stage is its own thing to click and drag, so the
+  // brush cursor gets out of the way over it.
+  const overLabel = !!(e.target && e.target.closest && e.target.closest('.annot-textbox'));
+  _annot.ptr = { x, y };
+  _annot.ptrIn = !overLabel && x >= 0 && y >= 0 && x <= box.width && y <= box.height;
+  _annotUpdateBrushRing();
+}
+function _annotUpdateBrushRing() {
+  const want = _annotBrushRingVisible();
+  const els = _annotRingEls(want);
+  if (!els) return;
+  const ring = els.ring, hud = els.hud, st = els.st, c = document.getElementById('annotCanvas');
+  // The system cursor is only ever hidden for a tool that HAS a ring — the
+  // resize handles and the transform tools set their own cursor and must keep it.
+  if (c && ANNOT_RING_TOOLS[_annot ? _annot.tool : '']) {
+    c.style.cursor = (want && _annot.ptrIn) ? 'none' : (ANNOT_CURSORS[_annot.tool] || 'crosshair');
+  }
+  if (!want) {
+    ring.style.display = 'none';
+    if (hud) hud.classList.remove('show');
+    return;
+  }
+  const box = _annotStageBox();
+  // While the pointer is away (a slider drag) the preview sits in the middle of
+  // the view, so the size still shows on the picture rather than only on a label.
+  const p = (_annot.ptrIn || _annot.drawing) && _annot.ptr ? _annot.ptr : { x: box.width / 2, y: box.height / 2 };
+  const px = Math.max(1, Math.round(_annot.size));
+  const d = px * _annotDisplayScale();
+  ring.style.display = 'block';
+  ring.classList.toggle('tiny', d < ANNOT_RING_TINY);
+  ring.style.width = ring.style.height = Math.max(1, d) + 'px';
+  ring.style.left = (p.x - d / 2) + 'px';
+  ring.style.top = (p.y - d / 2) + 'px';
+  if (hud) {
+    const on = _annot.hudUntil > Date.now();
+    hud.classList.toggle('show', on);
+    if (on) {
+      hud.textContent = px + ' px';
+      hud.style.left = Math.min(box.width - 8, Math.max(8, p.x)) + 'px';
+      hud.style.top = Math.min(box.height - 26, p.y + d / 2 + 12) + 'px';
+    }
+  }
+}
+// Show the ring and its "12 px" badge for a moment after the size changes, so
+// the slider, the wheel and [ ] all say what they did even when the pointer is
+// nowhere near the picture.
+function _annotBrushFlash() {
+  if (!_annot) return;
+  _annot.hudUntil = Date.now() + ANNOT_HUD_MS;
+  _annotUpdateBrushRing();
+  clearTimeout(_annot.hudTimer);
+  _annot.hudTimer = setTimeout(() => { if (_annot) _annotUpdateBrushRing(); }, ANNOT_HUD_MS + 40);
+}
+// hex → [r,g,b]
+function _annotHexToRgb(hex) {
+  hex = String(hex || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  const n = parseInt(hex || '000000', 16) || 0;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+// Paint-bucket flood fill: from the clicked pixel, recolour every connected
+// pixel whose colour is within tolerance of it — fills enclosed shapes/regions.
+function _annotFloodFill(sx, sy) {
+  const cv = _annot.canvas, ctx = _annot.ctx, W = cv.width, H = cv.height;
+  sx = Math.floor(sx); sy = Math.floor(sy);
+  if (sx < 0 || sy < 0 || sx >= W || sy >= H) return;
+  const img = ctx.getImageData(0, 0, W, H), out = img.data;
+  const src = new Uint8ClampedArray(out);   // stable copy for matching
+  const at = (x, y) => (y * W + x) * 4;
+  const s0 = at(sx, sy);
+  const tr = src[s0], tg = src[s0 + 1], tb = src[s0 + 2], ta = src[s0 + 3];
+  // Erasing with the bucket CUTS when the session is set to transparent — the
+  // fastest way to take a flat plate off a sprite: click it, it is gone.
+  const cut = _annot.tool === 'erase' && annotEraseClears();
+  const fill = _annot.tool === 'erase' ? [255, 255, 255] : _annotHexToRgb(_annot.color);
+  const fr = fill[0], fg = fill[1], fb = fill[2];
+  if (!cut && Math.abs(tr - fr) < 2 && Math.abs(tg - fg) < 2 && Math.abs(tb - fb) < 2 && ta === 255) return; // already that colour
+  if (cut && ta === 0) return;                    // already empty here
+  const t = Math.max(1, _annot.tol || 32);
+  const TOL = t * t * 3;   // squared colour distance a pixel may differ and still count
+  const match = i => { const dr = src[i] - tr, dg = src[i + 1] - tg, db = src[i + 2] - tb, da = src[i + 3] - ta; return dr * dr + dg * dg + db * db + da * da <= TOL; };
+  const seen = new Uint8Array(W * H);
+  const stack = [[sx, sy]];
+  while (stack.length) {
+    let [x, y] = stack.pop();
+    while (x > 0 && match(at(x - 1, y))) x--;   // walk to the left edge of this span
+    let up = false, dn = false;
+    for (; x < W && match(at(x, y)); x++) {
+      const k = y * W + x; if (seen[k]) continue; seen[k] = 1;
+      const i = k * 4;
+      if (cut) { out[i + 3] = 0; }
+      else { out[i] = fr; out[i + 1] = fg; out[i + 2] = fb; out[i + 3] = 255; }
+      if (y > 0) { const mu = match(at(x, y - 1)); if (mu && !up && !seen[k - W]) stack.push([x, y - 1]); up = mu; }
+      if (y < H - 1) { const md = match(at(x, y + 1)); if (md && !dn && !seen[k + W]) stack.push([x, y + 1]); dn = md; }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+// ---- MOVE: lift the selection off the picture and drop it anywhere ---------
+// Photoshop's Move tool. Dragging inside a selection cuts those pixels out onto
+// a floating layer that follows the pointer; the hole they left follows the
+// ⬜/▨ Erase-to setting — white on a scanned page, a real hole on art. Hold
+// Alt to copy instead of cut, leaving the original where it was. The float is
+// only burned in on release, so nothing is committed until you let go.
+function _annotSelLift(copy) {
+  const m = _annotSelMask(); if (!m) return null;
+  const cv = _annot.canvas, ctx = _annot.ctx;
+  const layer = document.createElement('canvas');
+  layer.width = m.w; layer.height = m.h;
+  const lx = layer.getContext('2d');
+  const src = ctx.getImageData(m.x, m.y, m.w, m.h);
+  const cut = lx.createImageData(m.w, m.h);
+  for (let k = 0; k < m.mask.length; k++) {
+    if (!m.mask[k]) continue;
+    const i = k * 4;
+    cut.data[i] = src.data[i]; cut.data[i + 1] = src.data[i + 1];
+    cut.data[i + 2] = src.data[i + 2]; cut.data[i + 3] = src.data[i + 3];
+  }
+  lx.putImageData(cut, 0, 0);
+  if (!copy) {
+    // The hole the pixels left behind follows the same rule Erase does: white
+    // on a scanned page, a real hole on a piece of art that stands on nothing.
+    const clear = annotEraseClears();
+    for (let k = 0; k < m.mask.length; k++) {
+      if (!m.mask[k]) continue;
+      const i = k * 4;
+      if (clear) { src.data[i + 3] = 0; }
+      else { src.data[i] = 255; src.data[i + 1] = 255; src.data[i + 2] = 255; src.data[i + 3] = 255; }
+    }
+    ctx.putImageData(src, m.x, m.y);
+  }
+  // The picture with the hole in it, so each drag frame redraws from a clean base.
+  const base = document.createElement('canvas');
+  base.width = cv.width; base.height = cv.height;
+  base.getContext('2d').drawImage(cv, 0, 0);
+  return { layer, base, mask: m, dx: 0, dy: 0 };
+}
+function _annotFloatDraw() {
+  const f = _annot && _annot.float; if (!f) return;
+  const ctx = _annot.ctx;
+  ctx.putImageData(f.base.getContext('2d').getImageData(0, 0, f.base.width, f.base.height), 0, 0);
+  ctx.drawImage(f.layer, f.mask.x + f.dx, f.mask.y + f.dy);
+}
+// Drop it: the float becomes part of the picture and the selection travels with
+// it, so it can be moved again, filled, or nudged further.
+function _annotFloatCommit() {
+  const f = _annot && _annot.float; if (!f) return;
+  _annotFloatDraw();
+  const m = f.mask;
+  _annot.sel = { x: m.x + f.dx, y: m.y + f.dy, w: m.w, h: m.h, mask: m.mask };
+  _annot.sel.outline = _annotMaskOutline(_annot.sel);
+  _annot.float = null;
+  _annotSelSyncBar();
+}
+
+// ---- ROTATE & SKEW (free transform) ---------------------------------------
+// Turning and slanting, for the two things that actually go wrong with a
+// scanned science paper: the whole page went in crooked, or one object inside
+// it (an arrow, a label, a pasted diagram) sits at the wrong angle.
+//
+// With a selection live the selected pixels are lifted onto their own layer —
+// the hole behind them is filled the way Move fills one (⬜/▨ Erase to) — so the object
+// turns on its own. With nothing selected the WHOLE picture is the object, and
+// the canvas grows so no corner is ever cut off.
+//
+// Nothing is committed while you drag: the preview redraws from the untouched
+// layer every frame, so turning 30° and back to 0° leaves the pixels as sharp
+// as they started. Only Apply burns it in.
+const ANNOT_XFORM_MAX_PX = 4000;   // never let "grow to fit" run away with memory
+const ANNOT_SCALE_MIN = 0.05;      // 5% — small enough to shrink a stamp, big enough to still grab
+const ANNOT_SCALE_MAX = 8;
+const _annotRad = d => (d || 0) * Math.PI / 180;
+function _annotWrapDeg(d) { d = ((d + 180) % 360 + 360) % 360 - 180; return Math.abs(d) < 1e-9 ? 0 : d; }
+function _annotClampNum(v, lo, hi) { return Math.min(hi, Math.max(lo, isNaN(v) ? 0 : v)); }
+function _annotXformSx(x) { return (x && typeof x.sx === 'number' && x.sx) ? x.sx : 1; }
+function _annotXformSy(x) { return (x && typeof x.sy === 'number' && x.sy) ? x.sy : 1; }
+function _annotXformIsIdentity(x) {
+  // A PASTED picture is never "nothing to do": the object itself is new, so
+  // even at 100% and 0° there is something to burn in. Reading it as identity
+  // would make ✓ Apply — and every tool switch — throw the paste away.
+  if (x && x.scope === 'paste') return false;
+  return !x || (!x.angle && !x.skewX && !x.skewY && _annotXformSx(x) === 1 && _annotXformSy(x) === 1 && !x.moved);
+}
+
+// Start a transform session. Snapshots history once, up front, so Cancel (and
+// Ctrl+Z afterwards) puts the picture back exactly as it was.
+function _annotXformBegin() {
+  if (!_annot || _annot.xform) return;
+  // Burn any label still being typed: a whole-picture turn resizes the canvas
+  // underneath it, and a floating label would be left pointing at nothing.
+  _annotCommitTextBoxes();
+  _annotPushHistory();
+  const cv = _annot.canvas;
+  let layer, ox, oy, base, scope;
+  const prevSel = _annot.sel;
+  if (_annot.sel) {
+    const lift = _annotSelLift(false);   // cut the object out; the hole follows ⬜/▨ Erase to
+    if (!lift) { showToast('That selection is empty — nothing to turn', 'info'); _annot.history.pop(); return; }
+    layer = lift.layer; ox = lift.mask.x; oy = lift.mask.y; base = lift.base; scope = 'sel';
+    _annot.sel = null; _annotSelSyncBar();   // the old outline no longer describes anything
+  } else {
+    layer = document.createElement('canvas');
+    layer.width = cv.width; layer.height = cv.height;
+    layer.getContext('2d').drawImage(cv, 0, 0);
+    ox = 0; oy = 0; base = null; scope = 'image';
+  }
+  _annot.xform = {
+    scope, layer, base, ox, oy,
+    cx: ox + layer.width / 2, cy: oy + layer.height / 2,
+    angle: 0, skewX: 0, skewY: 0,
+    sx: 1, sy: 1, lock: true, moved: false,
+    grow: scope === 'image',
+    baseW: cv.width, baseH: cv.height,
+    straighten: false, strLine: null, prevSel
+  };
+  _annotXformSyncBar();
+  _annotXformPreview();
+}
+
+// ---- PASTE a picture straight into the editor ------------------------------
+// The picture somebody wants to drop onto a diagram is nearly always already on
+// the clipboard — a screenshot, a photo, a figure lifted out of another
+// question. Ctrl+V (or 📋 Paste) puts it on the canvas scaled to FIT the
+// picture it is landing on, and opens the transform box on it straight away, so
+// the eight handles are live from the first moment: drag a corner to resize,
+// drag the middle to move, then ✓ Apply. That is the PowerPoint gesture, which
+// is the one everybody already has in their fingers.
+//
+// It is its OWN transform scope (`paste`) rather than a selection lift, because
+// the pixels do not come off the canvas: `base` is the picture untouched, so
+// Cancel — and the history step taken here — simply leave no trace of it.
+const ANNOT_PASTE_FIT = 0.9;       // land inside this much of the canvas, so the handles have room
+const ANNOT_PASTE_MAX_PX = 2200;   // never hold a layer bitmap bigger than this
+// The image file on the clipboard, if there is one. `items` is what a
+// screenshot arrives as; `files` is what a copied file arrives as.
+function _annotClipboardImageFile(e) {
+  const dt = e && e.clipboardData;
+  if (!dt) return null;
+  const items = dt.items ? Array.from(dt.items) : [];
+  for (const it of items) {
+    if (it && it.kind === 'file' && String(it.type || '').startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) return f;
+    }
+  }
+  const files = dt.files ? Array.from(dt.files) : [];
+  for (const f of files) if (f && String(f.type || '').startsWith('image/')) return f;
+  return null;
+}
+// Bound in CAPTURE while the editor is open, so it beats the page-level paste
+// handlers (the exam paper builder, Mark Paper, the contenteditable guard) —
+// any of which could be on the page underneath the overlay.
+function _annotPasteHandler(e) {
+  if (!_annot) return;
+  const ov = document.getElementById('annotOverlay');
+  if (!ov || !ov.classList.contains('is-open')) return;
+  // A label being typed keeps its own paste: pasting WORDS into a text box is
+  // the other honest meaning of Ctrl+V in here.
+  if (_annotTypingInField(e)) return;
+  const file = _annotClipboardImageFile(e);
+  if (!file) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const r = new FileReader();
+  r.onload = () => _annotPasteDataUrl(String(r.result || ''));
+  r.onerror = () => showToast('Could not read that picture from the clipboard', 'error');
+  r.readAsDataURL(file);
+}
+function _annotPasteDataUrl(url) {
+  if (!url || !_annot) return;
+  _loadImageEl(url).then(img => _annotPasteImage(img))
+    .catch(err => { console.warn('annot paste', err); showToast('Could not open that pasted picture', 'error'); });
+}
+// The 📋 button: the keyboard shortcut is invisible, and a toolbar full of
+// tools is where somebody looks for "put a picture in". Reading the clipboard
+// needs permission, and Safari/Firefox may refuse outright — so a refusal says
+// to use Ctrl+V instead rather than failing silently.
+async function annotPasteFromClipboard() {
+  if (!_annot) return;
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    showToast('Press Ctrl+V (⌘V) to paste a picture in from the clipboard', 'info');
+    return;
+  }
+  try {
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const type = (it.types || []).find(t => String(t).startsWith('image/'));
+      if (!type) continue;
+      const blob = await it.getType(type);
+      const url = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result || '')); r.onerror = rej;
+        r.readAsDataURL(blob);
+      });
+      _annotPasteDataUrl(url);
+      return;
+    }
+    showToast('There is no picture on the clipboard — copy one first', 'info');
+  } catch (err) {
+    console.warn('clipboard read', err);
+    showToast('This browser will not let a page read the clipboard — press Ctrl+V (⌘V) instead', 'info');
+  }
+}
+function _annotPasteImage(img) {
+  if (!_annot) return;
+  const iw = img.naturalWidth || img.width || 0, ih = img.naturalHeight || img.height || 0;
+  if (!iw || !ih) { showToast('That clipboard picture was empty', 'error'); return; }
+  // Settle whatever transform was open first — a paste is a NEW object and must
+  // never inherit the last one's angle, nor silently discard its work.
+  if (_annot.xform) {
+    if (_annotXformIsIdentity(_annot.xform)) annotXformCancel(true); else annotXformApply(true);
+  }
+  // A label mid-type would be left pointing at a picture that has moved on.
+  _annotCommitTextBoxes();
+  _annotPushHistory();
+  const cv = _annot.canvas;
+  // The layer holds the pasted picture at its OWN resolution (capped), and what
+  // fits it into the window is the transform's scale — which is exactly what
+  // the handles then edit. So dragging a corner back out stays sharp instead of
+  // magnifying an already-shrunken bitmap.
+  const cap = Math.min(1, ANNOT_PASTE_MAX_PX / Math.max(iw, ih));
+  const lw = Math.max(1, Math.round(iw * cap)), lh = Math.max(1, Math.round(ih * cap));
+  const layer = document.createElement('canvas');
+  layer.width = lw; layer.height = lh;
+  const lx = layer.getContext('2d');
+  lx.imageSmoothingEnabled = true;
+  try { lx.imageSmoothingQuality = 'high'; } catch (_) {}
+  lx.drawImage(img, 0, 0, lw, lh);
+  // The picture as it stands, so every preview frame redraws from a clean base.
+  const base = document.createElement('canvas');
+  base.width = cv.width; base.height = cv.height;
+  base.getContext('2d').drawImage(cv, 0, 0);
+  // Fit it inside what it is landing on — never blown UP past its own pixels,
+  // and never so large that the corner handles sit off the edge of the stage.
+  const fit = Math.min(1, (cv.width * ANNOT_PASTE_FIT) / lw, (cv.height * ANNOT_PASTE_FIT) / lh);
+  const s = _annotXformClampScale(null, fit, Math.max(lw, lh));
+  const prevSel = _annot.sel;
+  _annot.sel = null; _annot.selPts = null; _annotSelSyncBar();
+  const cx = cv.width / 2, cy = cv.height / 2;
+  _annot.xform = {
+    scope: 'paste', layer, base, ox: cx - lw / 2, oy: cy - lh / 2,
+    cx, cy, angle: 0, skewX: 0, skewY: 0,
+    sx: s, sy: s, lock: true, moved: false,
+    grow: false,
+    baseW: cv.width, baseH: cv.height,
+    straighten: false, strLine: null, prevSel
+  };
+  // Resize is the tool the handles belong to, so the pasted picture arrives
+  // ready to drag rather than waiting to be discovered.
+  _annotSetTool('scale');
+  _annotXformSyncBar();
+  _annotXformPreview();
+  showToast('📋 Pasted ' + iw + '×' + ih + ' — drag the handles to resize, drag the middle to move, then Apply.', 'success');
+}
+// Scale first, then skew, then rotate — the same order the canvas applies them
+// below, so the corner maths and the render can never drift apart. (u, v) are
+// layer pixels measured from the pivot, BEFORE scaling.
+function _annotXformMapper(x) {
+  const a = _annotRad(x.angle), cos = Math.cos(a), sin = Math.sin(a);
+  const tx = Math.tan(_annotRad(x.skewX)), ty = Math.tan(_annotRad(x.skewY));
+  const sx = _annotXformSx(x), sy = _annotXformSy(x);
+  return (u, v) => {
+    const zu = u * sx, zv = v * sy;
+    const su = zu + tx * zv, sv = ty * zu + zv;
+    return { x: x.cx + su * cos - sv * sin, y: x.cy + su * sin + sv * cos };
+  };
+}
+// The other direction, for turning a pointer position back into the object's
+// own coordinates while a handle is being dragged. Two stops on the way back:
+// the M-FRAME (rotation and slant undone, scaling still applied) is what the
+// resize maths works in, and layer coordinates are one divide further.
+function _annotXformMFrameVec(x, vx, vy) {
+  const a = -_annotRad(x.angle), cos = Math.cos(a), sin = Math.sin(a);
+  const rx = vx * cos - vy * sin, ry = vx * sin + vy * cos;
+  const tx = Math.tan(_annotRad(x.skewX)), ty = Math.tan(_annotRad(x.skewY));
+  const det = (1 - tx * ty) || 1e-6;
+  return { x: (rx - tx * ry) / det, y: (ry - ty * rx) / det };
+}
+function _annotXformMFrame(x, px, py) { return _annotXformMFrameVec(x, px - x.cx, py - x.cy); }
+function _annotXformUnmapVec(x, vx, vy) {
+  const m = _annotXformMFrameVec(x, vx, vy);
+  return { x: m.x / (_annotXformSx(x) || 1e-6), y: m.y / (_annotXformSy(x) || 1e-6) };
+}
+function _annotXformCorners(x) {
+  const map = _annotXformMapper(x);
+  const u0 = x.ox - x.cx, v0 = x.oy - x.cy;
+  const u1 = u0 + x.layer.width, v1 = v0 + x.layer.height;
+  return [map(u0, v0), map(u1, v0), map(u1, v1), map(u0, v1)];
+}
+function _annotXformDrawInto(ctx, x, offX, offY) {
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  try { ctx.imageSmoothingQuality = 'high'; } catch (_) {}
+  ctx.translate(x.cx + offX, x.cy + offY);
+  ctx.rotate(_annotRad(x.angle));
+  ctx.transform(1, Math.tan(_annotRad(x.skewY)), Math.tan(_annotRad(x.skewX)), 1, 0, 0);
+  ctx.scale(_annotXformSx(x), _annotXformSy(x));
+  ctx.drawImage(x.layer, x.ox - x.cx, x.oy - x.cy);
+  ctx.restore();
+}
+// Redraw the canvas for the current angle/slant. Whole-picture transforms
+// recompute the canvas size each frame so you see the real result, corners and
+// all, and the view re-fits so the picture doesn't wander off the stage.
+function _annotXformPreview() {
+  const x = _annot && _annot.xform; if (!x) return;
+  const cv = _annot.canvas;
+  let W = x.baseW, H = x.baseH, offX = 0, offY = 0, refit = false;
+  if (x.scope === 'image' && x.grow) {
+    const c = _annotXformCorners(x);
+    const minX = Math.min(...c.map(p => p.x)), maxX = Math.max(...c.map(p => p.x));
+    const minY = Math.min(...c.map(p => p.y)), maxY = Math.max(...c.map(p => p.y));
+    W = _annotClampNum(Math.ceil(maxX - minX), 1, ANNOT_XFORM_MAX_PX);
+    H = _annotClampNum(Math.ceil(maxY - minY), 1, ANNOT_XFORM_MAX_PX);
+    offX = -minX; offY = -minY;
+  }
+  if (cv.width !== W || cv.height !== H) { _annotResizeCanvas(W, H); refit = true; }
+  const ctx = _annot.ctx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // Turning the WHOLE picture opens up new corners. On a scanned page those are
+  // paper, so they go white; on a piece of art that stands on nothing they must
+  // stay empty, or straightening a sprite boxes it in a white rectangle.
+  ctx.clearRect(0, 0, W, H);
+  if (!annotEraseClears()) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H); }
+  if (x.base) ctx.drawImage(x.base, offX, offY);
+  _annotXformDrawInto(ctx, x, offX, offY);
+  x.offX = offX; x.offY = offY;
+  if (refit) annotZoomFit();
+}
+// ---- Free transform: the eight handles round the box ----------------------
+// Corners resize both ways at once, edge handles one way, and the corner
+// opposite the one you drag stays exactly where it is — the thing everybody
+// expects of a resize box and the reason the maths below anchors rather than
+// just multiplying a scale.
+const ANNOT_HANDLES = [
+  { id: 'nw', hx: 0, hy: 0, cur: 'nwse-resize' }, { id: 'n', hx: 0.5, hy: 0, cur: 'ns-resize' },
+  { id: 'ne', hx: 1, hy: 0, cur: 'nesw-resize' }, { id: 'e', hx: 1, hy: 0.5, cur: 'ew-resize' },
+  { id: 'se', hx: 1, hy: 1, cur: 'nwse-resize' }, { id: 's', hx: 0.5, hy: 1, cur: 'ns-resize' },
+  { id: 'sw', hx: 0, hy: 1, cur: 'nesw-resize' }, { id: 'w', hx: 0, hy: 0.5, cur: 'ew-resize' },
+];
+function _annotXformHandles(x) {
+  const map = _annotXformMapper(x);
+  const W = x.layer.width, H = x.layer.height;
+  const d = { x: x.ox - x.cx, y: x.oy - x.cy };
+  return ANNOT_HANDLES.map(h => Object.assign({}, h, {
+    pt: map(d.x + h.hx * W, d.y + h.hy * H),
+    pD: { x: h.hx * W, y: h.hy * H },            // the handle, in layer pixels
+    pA: { x: (1 - h.hx) * W, y: (1 - h.hy) * H },// the point it pivots against
+  }));
+}
+// Which handle is under the pointer, judged in SCREEN pixels so it stays
+// grabbable at any zoom.
+function _annotXformHandleAt(p) {
+  const x = _annot && _annot.xform; if (!x) return null;
+  const s = _annotDisplayScale() || 1;
+  const q = _annotXformUnoffset(x, p);
+  let best = null, bestD = 11 / s;
+  _annotXformHandles(x).forEach(h => {
+    const d = Math.hypot(q.x - h.pt.x, q.y - h.pt.y);
+    if (d <= bestD) { bestD = d; best = h; }
+  });
+  return best;
+}
+// A pointer position arrives in CANVAS coordinates; the transform maths lives
+// in the frame the object is composed in, which a growing canvas shifts by
+// (offX, offY). Everything that compares the two has to go through here.
+function _annotXformUnoffset(x, p) { return { x: p.x - (x.offX || 0), y: p.y - (x.offY || 0) }; }
+// Is the pointer inside the transform box? (Point-in-quad by winding.) That is
+// what makes dragging the middle of the box move the object.
+function _annotXformInside(p) {
+  const x = _annot && _annot.xform; if (!x) return false;
+  const c = _annotXformCorners(x);
+  p = _annotXformUnoffset(x, p);
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = c[i], b = c[(i + 1) % 4];
+    const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (Math.abs(cross) < 1e-9) continue;
+    const s = cross > 0 ? 1 : -1;
+    if (!sign) sign = s; else if (s !== sign) return false;
+  }
+  return true;
+}
+// Put the pivot back in the middle of the box without moving a single pixel:
+// the shift is taken straight back out of the layer's own offset. Run after a
+// resize or a move, so a turn afterwards spins about the object's centre.
+function _annotXformRecentre(x) {
+  const W = x.layer.width, H = x.layer.height;
+  const d = { x: x.ox - x.cx, y: x.oy - x.cy };
+  const c = _annotXformMapper(x)(d.x + W / 2, d.y + H / 2);
+  const shift = _annotXformUnmapVec(x, x.cx - c.x, x.cy - c.y);
+  x.cx = c.x; x.cy = c.y;
+  x.ox = c.x + d.x + shift.x;
+  x.oy = c.y + d.y + shift.y;
+}
+// Begin a handle drag: everything the move needs is frozen here, so each frame
+// is computed from the state at mouse-down and can never drift.
+function _annotXformScaleStart(h) {
+  const x = _annot.xform;
+  const d = { x: x.ox - x.cx, y: x.oy - x.cy };
+  const sx = _annotXformSx(x), sy = _annotXformSy(x);
+  _annot.xfScale = {
+    h, sx0: sx, sy0: sy,
+    // The anchor's position in the M-frame — the one point the drag holds still.
+    Ua: (d.x + h.pA.x) * sx, Va: (d.y + h.pA.y) * sy,
+    spanX: h.pD.x - h.pA.x, spanY: h.pD.y - h.pA.y,
+  };
+}
+function _annotXformScaleDrag(p, shift) {
+  const x = _annot && _annot.xform, st = _annot && _annot.xfScale;
+  if (!x || !st) return;
+  const q = _annotXformUnoffset(x, p);
+  const m = _annotXformMFrame(x, q.x, q.y);
+  let sx = st.sx0, sy = st.sy0;
+  if (Math.abs(st.spanX) > 0.5) sx = (m.x - st.Ua) / st.spanX;
+  if (Math.abs(st.spanY) > 0.5) sy = (m.y - st.Va) / st.spanY;
+  // Locked (or Shift held): one factor drives both axes, so the object keeps
+  // its shape. The bigger of the two moves wins, and each axis keeps its own
+  // sign — dragging a handle past the anchor still flips the object.
+  const keep = x.lock !== (!!shift);          // Shift is a momentary override
+  if (keep) {
+    // Only the axes this handle actually drives get a vote: an edge handle
+    // leaves its other axis at 1x, and letting that count would out-vote the
+    // shrink the drag is asking for.
+    const fx = Math.abs(st.spanX) > 0.5 ? sx / (st.sx0 || 1) : null;
+    const fy = Math.abs(st.spanY) > 0.5 ? sy / (st.sy0 || 1) : null;
+    const f = Math.max(fx === null ? 0 : Math.abs(fx), fy === null ? 0 : Math.abs(fy)) || 1;
+    sx = Math.sign(fx === null ? 1 : (fx || 1)) * f * st.sx0;
+    sy = Math.sign(fy === null ? 1 : (fy || 1)) * f * st.sy0;
+  }
+  sx = _annotXformClampScale(x, sx, x.layer.width);
+  sy = _annotXformClampScale(x, sy, x.layer.height);
+  // Hold the anchor: the layer offset is whatever puts it back where it was.
+  x.sx = sx; x.sy = sy;
+  x.ox = x.cx + st.Ua / sx - st.h.pA.x;
+  x.oy = x.cy + st.Va / sy - st.h.pA.y;
+  _annotXformSyncBar();
+  _annotXformPreview();
+}
+// A scale factor has to keep the object visible, keep it under the canvas
+// ceiling, and never be zero — a zero would collapse the object with no way
+// back, because the offset maths divides by it.
+function _annotXformClampScale(x, s, sidePx) {
+  const sign = s < 0 ? -1 : 1;
+  let mag = Math.abs(s);
+  if (!isFinite(mag) || mag < ANNOT_SCALE_MIN) mag = ANNOT_SCALE_MIN;
+  const roomy = Math.max(ANNOT_SCALE_MIN, ANNOT_XFORM_MAX_PX / Math.max(1, sidePx));
+  mag = Math.min(mag, ANNOT_SCALE_MAX, roomy);
+  return sign * mag;
+}
+// Drag the middle of the box to reposition the object. The pivot travels with
+// it, so the object keeps turning about its own centre.
+function _annotXformMoveTo(dx, dy) {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.cx += dx; x.cy += dy; x.ox += dx; x.oy += dy;
+  x.moved = true;
+  _annotXformPreview();
+}
+// The % boxes and the flip buttons scale about the pivot, which _after a
+// recentre_ is the middle of the box — so the object grows evenly both ways
+// instead of creeping off to one side.
+function annotXformSetScale(field, val) {
+  const x = _annot && _annot.xform; if (!x) return;
+  const side = field === 'sx' ? x.layer.width : x.layer.height;
+  const was = field === 'sx' ? _annotXformSx(x) : _annotXformSy(x);
+  const want = _annotXformClampScale(x, (parseFloat(val) || 0) / 100 * (was < 0 ? -1 : 1), side);
+  const f = want / (was || 1);
+  x[field] = want;
+  if (x.lock) {
+    const other = field === 'sx' ? 'sy' : 'sx';
+    const oside = field === 'sx' ? x.layer.height : x.layer.width;
+    x[other] = _annotXformClampScale(x, (field === 'sx' ? _annotXformSy(x) : _annotXformSx(x)) * f, oside);
+  }
+  _annotXformSyncBar();
+  _annotXformPreview();
+}
+function annotXformSetLock(on) {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.lock = !!on;
+  _annotXformSyncBar();
+}
+function annotXformFlip(axis) {
+  const x = _annot && _annot.xform; if (!x) return;
+  if (axis === 'y') x.sy = -_annotXformSy(x); else x.sx = -_annotXformSx(x);
+  _annotXformSyncBar();
+  _annotXformPreview();
+}
+function annotXformScaleNudge(f) {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.sx = _annotXformClampScale(x, _annotXformSx(x) * f, x.layer.width);
+  x.sy = _annotXformClampScale(x, _annotXformSy(x) * f, x.layer.height);
+  _annotXformSyncBar();
+  _annotXformPreview();
+}
+
+// The transformed object becomes the new selection, so it can be turned again,
+// nudged with Move, or filled — the mask comes straight from its alpha.
+function _annotXformSelFromLayer() {
+  const x = _annot.xform, cv = _annot.canvas;
+  const sc = document.createElement('canvas');
+  sc.width = cv.width; sc.height = cv.height;
+  _annotXformDrawInto(sc.getContext('2d'), x, x.offX || 0, x.offY || 0);
+  const d = sc.getContext('2d').getImageData(0, 0, sc.width, sc.height).data;
+  let x0 = sc.width, y0 = sc.height, x1 = -1, y1 = -1;
+  for (let y = 0; y < sc.height; y++) for (let px = 0; px < sc.width; px++) {
+    if (d[(y * sc.width + px) * 4 + 3] < 128) continue;
+    if (px < x0) x0 = px; if (px > x1) x1 = px;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const mask = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let px = 0; px < w; px++) {
+    mask[y * w + px] = d[((y + y0) * sc.width + (px + x0)) * 4 + 3] >= 128 ? 1 : 0;
+  }
+  const sel = { x: x0, y: y0, w, h, mask };
+  sel.outline = _annotMaskOutline(sel);
+  return sel;
+}
+function _annotXformEnd() {
+  if (!_annot) return;
+  _annot.xform = null;
+  _annot.xfScale = null; _annot.xfMove = false;
+  _annotXformSyncBar();
+  _annotSelSyncBar();
+}
+// Burn the transform in. An untouched session just melts away — no history
+// step is spent on a turn of 0°.
+function annotXformApply(quiet) {
+  const x = _annot && _annot.xform; if (!x) return;
+  if (_annotXformIsIdentity(x)) { annotXformCancel(true); return; }
+  _annotXformPreview();
+  // A pasted picture becomes the selection too, so it can be nudged, filled or
+  // turned again straight afterwards without hunting for it with the lasso.
+  const sel = x.scope === 'image' ? null : _annotXformSelFromLayer();
+  const what = x.scope === 'image' ? 'Picture' : x.scope === 'paste' ? 'Pasted picture' : 'Object';
+  const bits = [];
+  const sx = _annotXformSx(x), sy = _annotXformSy(x);
+  const pct = v => Math.round(Math.abs(v) * 1000) / 10 + '%';
+  if (Math.abs(sx) !== 1 || Math.abs(sy) !== 1) bits.push('resized to ' + pct(sx) + ' × ' + pct(sy));
+  if (sx < 0 && sy < 0) bits.push('flipped both ways');
+  else if (sx < 0) bits.push('flipped ↔');
+  else if (sy < 0) bits.push('flipped ↕');
+  if (x.angle) bits.push('turned ' + (Math.round(x.angle * 10) / 10) + '°');
+  if (x.skewX) bits.push('slanted ' + (Math.round(x.skewX * 10) / 10) + '° ↔');
+  if (x.skewY) bits.push('slanted ' + (Math.round(x.skewY * 10) / 10) + '° ↕');
+  if (x.moved && !bits.length) bits.push('moved');
+  else if (x.moved) bits.push('moved');
+  if (x.scope === 'paste' && !bits.length) bits.push('placed');
+  _annotXformEnd();
+  if (sel) { _annot.sel = sel; _annotSelSyncBar(); }
+  if (!quiet) showToast(what + ' ' + (bits.join(', ') || 'transformed') + ' — Undo puts it back.', 'success');
+}
+// Throw the session away and restore the snapshot taken when it started. The
+// selection that was lifted comes back too, so cancelling costs nothing.
+function annotXformCancel(quiet) {
+  if (!_annot || !_annot.xform) return;
+  const prevSel = _annot.xform.prevSel || null;
+  const wasPaste = _annot.xform.scope === 'paste';
+  _annotXformEnd();
+  annotUndo();
+  _annot.sel = prevSel;
+  _annotSelSyncBar();
+  if (!quiet) showToast(wasPaste ? 'Pasted picture removed' : 'Turn cancelled — picture put back', 'info');
+}
+function annotXformReset() {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.angle = 0; x.skewX = 0; x.skewY = 0; x.strLine = null;
+  x.sx = 1; x.sy = 1;
+  _annotXformSyncBar(); _annotXformPreview();
+}
+function annotXformSet(field, val) {
+  const x = _annot && _annot.xform; if (!x) return;
+  const lim = field === 'angle' ? 180 : 60;
+  x[field] = _annotClampNum(parseFloat(val), -lim, lim);
+  _annotXformSyncBar(); _annotXformPreview();
+}
+function annotXformNudge(deg) {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.angle = _annotWrapDeg(x.angle + deg);
+  _annotXformSyncBar(); _annotXformPreview();
+}
+function annotXformSetGrow(on) {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.grow = !!on;
+  _annotXformPreview();
+}
+// Straighten: drag a line along something that ought to be level (a table rule,
+// the base of a diagram, a line of print) and the picture turns to make it so.
+function annotXformStraightenStart() {
+  const x = _annot && _annot.xform; if (!x) return;
+  x.straighten = true; x.strLine = null;
+  _annotXformSyncBar();
+  showToast('📐 Now drag a line along an edge that should be straight', 'info');
+}
+function _annotXformStraightenFinish() {
+  const x = _annot && _annot.xform; if (!x || !x.strLine) return;
+  const { from, to } = x.strLine;
+  const dx = to.x - from.x, dy = to.y - from.y;
+  x.strLine = null;
+  // A stray click leaves Straighten armed — you meant to trace, not to click.
+  if (Math.hypot(dx, dy) < 20) { showToast('Drag a longer line along the edge you want level', 'info'); _annotXformSyncBar(); return; }
+  x.straighten = false;
+  let deg = Math.atan2(dy, dx) * 180 / Math.PI;
+  if (deg > 90) deg -= 180; else if (deg < -90) deg += 180;
+  if (Math.abs(deg) > 45) deg -= Math.sign(deg) * 90;   // they traced a vertical edge
+  x.angle = _annotWrapDeg(x.angle - deg);
+  _annotXformSyncBar();
+  _annotXformPreview();
+  showToast('Straightened by ' + (Math.round(-deg * 10) / 10) + '° — fine-tune with the Turn slider', 'success');
+}
+function _annotXformSyncBar() {
+  const bar = document.getElementById('annotXformBar');
+  const x = _annot && _annot.xform;
+  if (bar) bar.style.display = x ? 'flex' : 'none';
+  if (!x) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v; };
+  set('annotXformAngle', x.angle); set('annotXformAngleNum', Math.round(x.angle * 10) / 10);
+  set('annotXformSkewX', x.skewX); set('annotXformSkewY', x.skewY);
+  const lbl = (id, v, unit) => { const el = document.getElementById(id); if (el) el.textContent = (Math.round(v * 10) / 10) + (unit || '°'); };
+  lbl('annotXformSkewXVal', x.skewX); lbl('annotXformSkewYVal', x.skewY);
+  // Size is shown as a percentage, and in real pixels beside it, because "how
+  // big will this actually be" is the question a resize is asked to answer.
+  const sx = _annotXformSx(x), sy = _annotXformSy(x);
+  set('annotXformSxNum', Math.round(Math.abs(sx) * 1000) / 10);
+  set('annotXformSyNum', Math.round(Math.abs(sy) * 1000) / 10);
+  const lock = document.getElementById('annotXformLock');
+  if (lock) lock.checked = x.lock !== false;
+  const px = document.getElementById('annotXformSizePx');
+  if (px) px.textContent = Math.round(Math.abs(sx) * x.layer.width) + ' × ' + Math.round(Math.abs(sy) * x.layer.height) + ' px';
+  const scope = document.getElementById('annotXformScope');
+  if (scope) scope.textContent = x.scope === 'sel' ? 'the selected object'
+    : x.scope === 'paste' ? 'the pasted picture' : 'the whole picture';
+  const growWrap = document.getElementById('annotXformGrowWrap');
+  if (growWrap) growWrap.style.display = x.scope === 'image' ? 'inline-flex' : 'none';
+  const grow = document.getElementById('annotXformGrow');
+  if (grow) grow.checked = !!x.grow;
+  const str = document.getElementById('annotXformStraightenBtn');
+  if (str) str.classList.toggle('active', !!x.straighten);
+}
+
+// History brush: paint the ORIGINAL picture back, one dab at a time.
+function _annotHistoryDab(x, y) {
+  if (!_annot.origSnap) return;
+  const ctx = _annot.ctx, r = Math.max(1, Math.round(_annot.size)) / 2;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+  ctx.drawImage(_annot.origSnap, 0, 0);
+  ctx.restore();
+}
+function _annotHistoryStroke(from, to) {
+  const r = Math.max(1, Math.round(_annot.size)) / 2;
+  const dx = to.x - from.x, dy = to.y - from.y, dist = Math.hypot(dx, dy);
+  const step = Math.max(1, r / 2), n = Math.max(1, Math.ceil(dist / step));
+  for (let i = 1; i <= n; i++) _annotHistoryDab(from.x + dx * (i / n), from.y + dy * (i / n));
+}
+
+// Clone stamp: copy a circular patch from the frozen source snapshot, offset so
+// the source point tracks the brush as you drag.
+function _annotCloneDab(ctx, x, y) {
+  if (!_annot.cloneSnap || !_annot.cloneOff) return;
+  const r = Math.max(1, Math.round(_annot.size)) / 2;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+  ctx.drawImage(_annot.cloneSnap, _annot.cloneOff.x, _annot.cloneOff.y);
+  ctx.restore();
+}
+function _annotCloneStroke(from, to) {
+  const ctx = _annot.ctx, r = Math.max(1, Math.round(_annot.size)) / 2;
+  const dx = to.x - from.x, dy = to.y - from.y, dist = Math.hypot(dx, dy);
+  const step = Math.max(1, r / 2), n = Math.max(1, Math.ceil(dist / step));
+  for (let i = 1; i <= n; i++) _annotCloneDab(ctx, from.x + dx * (i / n), from.y + dy * (i / n));
+}
+function _annotStageBox() {
+  const st = document.getElementById('annotStage');
+  return st ? st.getBoundingClientRect() : { left: 0, top: 0, width: 1, height: 1 };
+}
+// Keep the image from being dragged fully out of the viewport.
+function _annotClampPan() {
+  if (!_annot) return;
+  const box = _annotStageBox(), s = _annotDisplayScale();
+  const w = _annot.canvas.width * s, h = _annot.canvas.height * s;
+  const margin = 40; // always keep at least this many px of image reachable
+  _annot.panX = Math.min(box.width - margin, Math.max(margin - w, _annot.panX));
+  _annot.panY = Math.min(box.height - margin, Math.max(margin - h, _annot.panY));
+}
+function annotZoomFit() {
+  if (!_annot) return;
+  const box = _annotStageBox();
+  _annot.fit = Math.min(box.width / _annot.canvas.width, box.height / _annot.canvas.height) || 1;
+  _annot.zoom = 1;
+  const s = _annotDisplayScale();
+  _annot.panX = (box.width - _annot.canvas.width * s) / 2;
+  _annot.panY = (box.height - _annot.canvas.height * s) / 2;
+  _annotUpdateTransform();
+}
+// Zoom about a viewport point (px relative to the stage). Keeps that point fixed.
+function _annotZoomAt(factor, vx, vy) {
+  if (!_annot) return;
+  const box = _annotStageBox();
+  if (vx == null) { vx = box.width / 2; vy = box.height / 2; }
+  const oldS = _annotDisplayScale();
+  const minZoom = 1, maxZoom = ANNOT_MAX_DISPLAY / (_annot.fit || 1);
+  const newZoom = Math.min(maxZoom, Math.max(minZoom, _annot.zoom * factor));
+  if (newZoom === _annot.zoom) return;
+  const newS = _annot.fit * newZoom;
+  // canvas-space point under the cursor stays put
+  const cx = (vx - _annot.panX) / oldS, cy = (vy - _annot.panY) / oldS;
+  _annot.zoom = newZoom;
+  _annot.panX = vx - cx * newS;
+  _annot.panY = vy - cy * newS;
+  _annotClampPan();
+  _annotUpdateTransform();
+}
+function annotZoomStep(factor) {
+  const box = _annotStageBox();
+  _annotZoomAt(factor, box.width / 2, box.height / 2);
+}
+function _annotWheel(e) {
+  if (!_annot) return;
+  e.preventDefault();   // never let the page/browser scroll or zoom
+  const box = _annotStageBox();
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  _annotZoomAt(factor, e.clientX - box.left, e.clientY - box.top);
+}
+function _annotTypingInField(e) {
+  const el = (e && e.target) || document.activeElement;
+  return !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable));
+}
+function _annotKeyDown(e) {
+  if (!_annot) return;
+  if (e.code === 'Space' && !_annotTypingInField(e)) { _annot.space = true; const st = document.getElementById('annotStage'); if (st) st.classList.add('canpan'); _annotUpdateBrushRing(); e.preventDefault(); }
+  // Escape backs out of the open transform first, then out of a selection, and
+  // only once there is nothing left to back out of does it close the editor —
+  // so a stray Esc mid-edit can never throw the whole touch-up away.
+  if (e.key === 'Escape' && !_annotTypingInField(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (_annot.xform) { _annot.drawing = false; annotXformCancel(); return; }
+    if (_annot.sel || _annot.selPts) { _annot.selPts = null; _annot.drawing = false; annotSelClear(); return; }
+    closeAnnotTool();
+    showToast('Touch-up closed — nothing was changed on the page.');
+    return;
+  }
+  // Ctrl/Cmd+Z works even from a text label; everything else needs the canvas.
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); annotUndo(); return; }
+  if (_annotTypingInField(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  // [ and ] step the brush the way every paint program does. Shift jumps by 5.
+  if (k === '[' || k === '{') { e.preventDefault(); _annotStepSize(k === '{' ? -5 : -1); return; }
+  if (k === ']' || k === '}') { e.preventDefault(); _annotStepSize(k === '}' ? 5 : 1); return; }
+  if (k === '+' || k === '=') { e.preventDefault(); annotZoomStep(1.3); return; }
+  if (k === '-' || k === '_') { e.preventDefault(); annotZoomStep(1 / 1.3); return; }
+  if (k === '0') { e.preventDefault(); annotZoomFit(); return; }
+  // Delete / Backspace cuts the selection away, the way every image editor does.
+  if ((k === 'Delete' || k === 'Backspace') && _annot.sel) { e.preventDefault(); annotSelDelete(); return; }
+  // Enter commits an open transform (Photoshop's habit); otherwise it saves.
+  if (k === 'Enter') { e.preventDefault(); if (_annot.xform) annotXformApply(); else applyAnnotTool(); return; }
+  const tool = ANNOT_KEYS[String(k).toLowerCase()];
+  if (tool) { e.preventDefault(); _annotSetTool(tool); }
+}
+function _annotKeyUp(e) { if (_annot && e.code === 'Space') { _annot.space = false; const st = document.getElementById('annotStage'); if (st) st.classList.remove('canpan'); _annotUpdateBrushRing(); } }
+function _annotBindZoomListeners() {
+  const st = document.getElementById('annotStage');
+  if (st && !st._zoomBound) {
+    st.addEventListener('wheel', _annotWheel, { passive: false });
+    // The pointer can leave the stage (or the window) without another move
+    // event ever arriving, which would strand the ring where it was last seen.
+    st.addEventListener('pointerleave', () => { if (_annot) { _annot.ptrIn = false; _annotUpdateBrushRing(); } });
+    st._zoomBound = true;
+  }
+  window.addEventListener('keydown', _annotKeyDown);
+  window.addEventListener('keyup', _annotKeyUp);
+  // Capture, so a picture pasted into the editor never reaches the page-level
+  // paste handlers sitting underneath the overlay.
+  window.addEventListener('paste', _annotPasteHandler, true);
+}
+function _annotUnbindZoomListeners() {
+  window.removeEventListener('keydown', _annotKeyDown);
+  window.removeEventListener('keyup', _annotKeyUp);
+  window.removeEventListener('paste', _annotPasteHandler, true);
+  const st = document.getElementById('annotStage');
+  if (st) st.classList.remove('canpan', 'panning');
+}
+const ANNOT_CURSORS = { text: 'text', fill: 'cell', wand: 'cell', move: 'move', rotate: 'grab', skew: 'ew-resize', scale: 'move' };
+function _annotSetTool(t) {
+  _annotResetCompose();      // never strand the canvas in destination-out
+  // Leaving Rotate/Skew/Resize settles the open transform: a real change is
+  // kept, an untouched one is dropped. Nothing is ever left half-applied.
+  if (_annot && _annot.xform && t !== 'rotate' && t !== 'skew' && t !== 'scale') {
+    if (_annotXformIsIdentity(_annot.xform)) annotXformCancel(true); else annotXformApply();
+  }
+  if (_annot) _annot.tool = t;
+  document.querySelectorAll('.annot-tool').forEach(b => b.classList.toggle('active', b.getAttribute('data-atool') === t));
+  const c = document.getElementById('annotCanvas');
+  if (c) c.style.cursor = ANNOT_CURSORS[t] || 'crosshair';
+  _annotUpdateCloneMarker();   // show the clone-source pin only while the Clone tool is active
+  // Picking Rotate, Skew or Resize opens the transform straight away, so the
+  // handles and sliders are there to use — you shouldn't have to drag once to
+  // discover the panel.
+  if (_annot && (t === 'rotate' || t === 'skew' || t === 'scale') && !_annot.xform) _annotXformBegin();
+  _annotXformSyncBar();
+  // Switching to a brush tool should show its size straight away — you should
+  // not have to make a mark to find out how big the mark will be.
+  if (_annot && ANNOT_RING_TOOLS[t]) _annotBrushFlash(); else _annotUpdateBrushRing();
+}
+// Single-key tool switching, Photoshop's letters where they exist.
+const ANNOT_KEYS = { e: 'erase', b: 'paint', g: 'fill', s: 'clone', y: 'history', m: 'select', l: 'lasso', w: 'wand', v: 'move', u: 'line', t: 'text', r: 'rotate', k: 'skew', f: 'scale' };
+// A history step remembers the canvas SIZE as well as its pixels: rotating the
+// whole picture grows the canvas, and undoing that has to shrink it back.
+/* A page raster is far bigger than the pictures this editor was written for —
+   A4 at 220dpi is about 18 MB an ImageData — so the depth is a MEMORY budget
+   rather than a fixed ten steps: enough undos to be useful on any size of
+   page, and never enough of them to exhaust the tab. */
+const ANNOT_HISTORY_BYTES = 150e6;
+const ANNOT_HISTORY_MAX = 10;
+function _annotHistoryDepth() {
+  if (!_annot) return ANNOT_HISTORY_MAX;
+  const perStep = Math.max(1, _annot.canvas.width * _annot.canvas.height * 4);
+  return Math.max(3, Math.min(ANNOT_HISTORY_MAX, Math.floor(ANNOT_HISTORY_BYTES / perStep)));
+}
+function _annotPushHistory() {
+  if (!_annot) return;
+  try {
+    _annot.history.push({ img: _annot.ctx.getImageData(0, 0, _annot.canvas.width, _annot.canvas.height), w: _annot.canvas.width, h: _annot.canvas.height });
+    const depth = _annotHistoryDepth();
+    while (_annot.history.length > depth) _annot.history.shift();
+  } catch (_) {}
+}
+function annotUndo() {
+  if (!_annot) return;
+  // While a rotate/skew is open, undo means "abandon this turn" — stepping the
+  // canvas back underneath a live session would leave the two out of step.
+  // (Cancel clears the session first, so this never recurses.)
+  if (_annot.xform) { annotXformCancel(); return; }
+  if (!_annot.history.length) return;
+  const step = _annot.history.pop();
+  if (_annot.canvas.width !== step.w || _annot.canvas.height !== step.h) {
+    _annotResizeCanvas(step.w, step.h);
+    annotZoomFit();
+  }
+  _annot.ctx.putImageData(step.img, 0, 0);
+}
+// Resize the working canvas (and the marching-ants overlay that rides on it).
+function _annotResizeCanvas(w, h) {
+  if (!_annot) return;
+  _annot.canvas.width = w; _annot.canvas.height = h;
+  if (_annot.selCanvas) { _annot.selCanvas.width = w; _annot.selCanvas.height = h; }
+}
+function _annotPt(e) {
+  const c = _annot.canvas, r = c.getBoundingClientRect();
+  const scale = c.width / r.width;
+  return { x: (e.clientX - r.left) * scale, y: (e.clientY - r.top) * (c.height / r.height), dispX: e.clientX - r.left, dispY: e.clientY - r.top, clientX: e.clientX, clientY: e.clientY, scale };
+}
+// Plot a crisp 1px line between two points (Bresenham) — no anti-aliasing, so a
+// 1px brush drags as clean single pixels, like a Photoshop pencil.
+function _annotPlotLine(ctx, x0, y0, x1, y1) {
+  x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.floor(x1); y1 = Math.floor(y1);
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  for (;;) {
+    ctx.fillRect(x0, y0, 1, 1);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+}
+// Snap the end point to the nearest 45° from the start (PowerPoint-style).
+function _annotSnap45(s, p) {
+  const dx = p.x - s.x, dy = p.y - s.y;
+  const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+  const len = Math.hypot(dx, dy);
+  return { x: s.x + Math.cos(ang) * len, y: s.y + Math.sin(ang) * len };
+}
+// Lock to the horizontal or vertical axis (whichever is dominant) — the
+// Photoshop Shift-drag brush constraint.
+function _annotSnapAxis(s, p) {
+  const dx = p.x - s.x, dy = p.y - s.y;
+  return Math.abs(dx) >= Math.abs(dy) ? { x: p.x, y: s.y } : { x: s.x, y: p.y };
+}
+// Constrain a rectangle drag to a square (Shift held while rect-selecting).
+function _annotSquarePt(s, p) {
+  const dx = p.x - s.x, dy = p.y - s.y;
+  const m = Math.max(Math.abs(dx), Math.abs(dy));
+  return { x: s.x + (dx < 0 ? -m : m), y: s.y + (dy < 0 ? -m : m) };
+}
+// One straight brush stroke between two points with the current tool settings
+// (used by the Photoshop click-then-Shift-click line).
+function _annotBrushLine(a, b) {
+  const ctx = _annot.ctx, lw = Math.max(1, Math.round(_annot.size));
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  _annotPaintCompose(ctx);
+  ctx.lineWidth = lw;
+  if (lw <= 1) { _annotPlotLine(ctx, a.x, a.y, b.x, b.y); }
+  else { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  _annotResetCompose();
+}
+// ---- SELECTION (rectangle / lasso) with marching ants, then fill the area
+// with a flat colour, the surrounding texture, or AI content-aware fill. ----
+function _annotSelPath(pts) {
+  const path = new Path2D();
+  if (!pts || pts.length < 2) return path;
+  path.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) path.lineTo(pts[i].x, pts[i].y);
+  path.closePath();
+  return path;
+}
+function _annotSelSyncBar() {
+  const bar = document.getElementById('annotSelBar');
+  if (bar) bar.style.display = (_annot && _annot.sel) ? 'flex' : 'none';
+}
+function annotSelClear() {
+  if (!_annot) return;
+  _annot.sel = null; _annot.selPts = null;
+  _annotSelSyncBar();
+}
+
+// ---- MAGIC WAND -----------------------------------------------------------
+// Click a colour and every pixel like it becomes the selection. Contiguous by
+// default (the patch you clicked); Alt+click takes that colour across the whole
+// picture, which is how you grab, say, every bit of a printed grey watermark in
+// one go. "Like it" is the ± slider: squared RGB distance, same yardstick the
+// paint bucket uses, so the two tools behave consistently.
+//
+// The result is a per-pixel MASK, not a polygon — a wand selection can be full
+// of holes and islands that no outline could describe. Every selection
+// operation below therefore works from a mask, and the polygon tools simply
+// rasterise into one.
+function _annotMagicWand(sx, sy, global) {
+  const cv = _annot.canvas, W = cv.width, H = cv.height;
+  sx = Math.floor(sx); sy = Math.floor(sy);
+  if (sx < 0 || sy < 0 || sx >= W || sy >= H) return null;
+  const d = _annot.ctx.getImageData(0, 0, W, H).data;
+  const at = (x, y) => (y * W + x) * 4;
+  const s0 = at(sx, sy);
+  const tr = d[s0], tg = d[s0 + 1], tb = d[s0 + 2];
+  const t = Math.max(1, _annot.tol || 32), TOL = t * t * 3;
+  const near = i => { const dr = d[i] - tr, dg = d[i + 1] - tg, db = d[i + 2] - tb; return dr * dr + dg * dg + db * db <= TOL; };
+  const mask = new Uint8Array(W * H);
+  if (global) {
+    for (let k = 0; k < mask.length; k++) if (near(k * 4)) mask[k] = 1;
+  } else {
+    const stack = [sy * W + sx];
+    mask[sy * W + sx] = 1;
+    while (stack.length) {
+      const k = stack.pop(), x = k % W, y = (k / W) | 0;
+      if (x > 0 && !mask[k - 1] && near(at(x - 1, y))) { mask[k - 1] = 1; stack.push(k - 1); }
+      if (x < W - 1 && !mask[k + 1] && near(at(x + 1, y))) { mask[k + 1] = 1; stack.push(k + 1); }
+      if (y > 0 && !mask[k - W] && near(at(x, y - 1))) { mask[k - W] = 1; stack.push(k - W); }
+      if (y < H - 1 && !mask[k + W] && near(at(x, y + 1))) { mask[k + W] = 1; stack.push(k + W); }
+    }
+  }
+  // Crop to the pixels actually hit so every later pass works on a small box.
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, n = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!mask[y * W + x]) continue;
+    n++;
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (!n) return null;
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y * w + x] = mask[(y + y0) * W + (x + x0)];
+  return { x: x0, y: y0, w, h, mask: out, count: n };
+}
+
+// The outline of a mask, as edge segments between a selected and an unselected
+// pixel. Marching ants ride this exactly like they ride a lasso path.
+function _annotMaskOutline(m) {
+  const path = new Path2D();
+  const on = (x, y) => (x < 0 || y < 0 || x >= m.w || y >= m.h) ? 0 : m.mask[y * m.w + x];
+  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
+    if (!on(x, y)) continue;
+    const px = m.x + x, py = m.y + y;
+    if (!on(x, y - 1)) { path.moveTo(px, py); path.lineTo(px + 1, py); }
+    if (!on(x, y + 1)) { path.moveTo(px, py + 1); path.lineTo(px + 1, py + 1); }
+    if (!on(x - 1, y)) { path.moveTo(px, py); path.lineTo(px, py + 1); }
+    if (!on(x + 1, y)) { path.moveTo(px + 1, py); path.lineTo(px + 1, py + 1); }
+  }
+  return path;
+}
+// Marching-ants animation: redraw the selection outline on the overlay canvas
+// while the tool is open. Dash length is in screen pixels regardless of zoom.
+let _annotAntsRunning = false;
+function _annotAntsLoop() {
+  if (!_annot || !_annot.selCanvas) { _annotAntsRunning = false; return; }
+  _annotAntsRunning = true;
+  const sc = _annot.selCanvas, sctx = sc.getContext('2d');
+  sctx.clearRect(0, 0, sc.width, sc.height);
+  const pts = (_annot.drawing && _annot.selPts) ? _annot.selPts : (_annot.sel && _annot.sel.pts ? _annot.sel.pts : null);
+  let path = null;
+  if (pts && pts.length > 1) path = _annotSelPath(pts);
+  else if (_annot.sel && _annot.sel.outline) path = _annot.sel.outline;
+  if (path) {
+    const s = _annotDisplayScale() || 1;
+    const phase = (performance.now() / 90) % 16;
+    sctx.lineWidth = Math.max(1 / s, 0.5);
+    sctx.setLineDash([6 / s, 6 / s]);
+    sctx.strokeStyle = '#ffffff'; sctx.lineDashOffset = -phase / s; sctx.stroke(path);
+    sctx.strokeStyle = '#111111'; sctx.lineDashOffset = -(phase + 6) / s; sctx.stroke(path);
+  }
+  // The transform box rides the same overlay: the object's real outline while
+  // it is being turned, slanted or resized, with grab handles on it while the
+  // Resize tool is the one in hand.
+  const xf = _annot.xform;
+  if (xf && xf.layer) {
+    const s = _annotDisplayScale() || 1;
+    const c = _annotXformCorners(xf);
+    const off = { x: xf.offX || 0, y: xf.offY || 0 };
+    sctx.setLineDash([]);
+    sctx.beginPath();
+    c.forEach((p, i) => { const X = p.x + off.x, Y = p.y + off.y; i ? sctx.lineTo(X, Y) : sctx.moveTo(X, Y); });
+    sctx.closePath();
+    sctx.lineWidth = Math.max(1.4 / s, 0.5);
+    sctx.strokeStyle = 'rgba(255,255,255,0.95)'; sctx.stroke();
+    sctx.lineWidth = Math.max(0.7 / s, 0.25);
+    sctx.strokeStyle = '#b45309'; sctx.stroke();
+    if (_annot.tool === 'scale') {
+      const r = 5 / s;
+      _annotXformHandles(xf).forEach(h => {
+        const X = h.pt.x + off.x, Y = h.pt.y + off.y;
+        sctx.beginPath(); sctx.rect(X - r, Y - r, r * 2, r * 2);
+        sctx.fillStyle = '#ffffff'; sctx.fill();
+        sctx.lineWidth = Math.max(1 / s, 0.4);
+        sctx.strokeStyle = '#b45309'; sctx.stroke();
+      });
+    }
+  }
+  if (xf && xf.strLine) {
+    const s = _annotDisplayScale() || 1;
+    sctx.setLineDash([]);
+    sctx.lineCap = 'round';
+    sctx.lineWidth = Math.max(1.5 / s, 0.6);
+    sctx.beginPath();
+    sctx.moveTo(xf.strLine.from.x, xf.strLine.from.y);
+    sctx.lineTo(xf.strLine.to.x, xf.strLine.to.y);
+    sctx.strokeStyle = 'rgba(255,255,255,0.9)'; sctx.stroke();
+    sctx.lineWidth = Math.max(0.8 / s, 0.3);
+    sctx.strokeStyle = '#0b6b4f'; sctx.stroke();
+  }
+  requestAnimationFrame(_annotAntsLoop);
+}
+// Rasterise the selection into a bounding box + per-pixel mask (1 = selected).
+// A wand selection already IS a mask and is handed straight back.
+function _annotSelMask() {
+  const sel = _annot && _annot.sel; if (!sel) return null;
+  if (sel.mask) return sel;
+  const W = _annot.canvas.width, H = _annot.canvas.height;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  sel.pts.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+  const w = x1 - x0, h = y1 - y0;
+  if (w < 1 || h < 1) return null;
+  const mc = document.createElement('canvas'); mc.width = w; mc.height = h;
+  const mx = mc.getContext('2d');
+  mx.translate(-x0, -y0);
+  mx.fillStyle = '#fff';
+  mx.fill(_annotSelPath(sel.pts));
+  const md = mx.getImageData(0, 0, w, h).data;
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) mask[i] = md[i * 4 + 3] > 127 ? 1 : 0;
+  return { x: x0, y: y0, w, h, mask };
+}
+// Apply a callback clipped to the selection, whichever kind it is: a polygon
+// gets a real canvas clip (anti-aliased edges), a wand mask is composited
+// pixel-by-pixel. One helper so every selection action supports both.
+function _annotWithSelClip(fn) {
+  const sel = _annot && _annot.sel; if (!sel) return;
+  const ctx = _annot.ctx;
+  if (sel.pts) { ctx.save(); ctx.clip(_annotSelPath(sel.pts)); fn(ctx); ctx.restore(); return; }
+  const m = sel;
+  const scratch = document.createElement('canvas');
+  scratch.width = _annot.canvas.width; scratch.height = _annot.canvas.height;
+  const sx = scratch.getContext('2d');
+  fn(sx);
+  const before = ctx.getImageData(m.x, m.y, m.w, m.h);
+  const after = sx.getImageData(m.x, m.y, m.w, m.h);
+  for (let k = 0; k < m.mask.length; k++) {
+    if (!m.mask[k] || after.data[k * 4 + 3] === 0) continue;
+    const i = k * 4;
+    before.data[i] = after.data[i]; before.data[i + 1] = after.data[i + 1];
+    before.data[i + 2] = after.data[i + 2]; before.data[i + 3] = 255;
+  }
+  ctx.putImageData(before, m.x, m.y);
+}
+// ---- DELETE: cut the selection away to nothing -----------------------------
+// The flow this exists for: pick the 🪄 wand, click the colour that should not
+// be there (Alt+click to take it across the WHOLE picture), press Delete. Those
+// pixels become transparent — not white, not black, gone — and the PNG that is
+// saved keeps the hole.
+function annotSelDelete() {
+  if (!_annot || !_annot.sel) { showToast('Select an area first — 🪄 wand, ⬚ select or ➰ lasso', 'info'); return; }
+  _annotPushHistory();
+  const ctx = _annot.ctx, sel = _annot.sel;
+  if (sel.pts) {
+    // A polygon gets a real clip, so the edge is anti-aliased rather than jagged.
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.fill(_annotSelPath(sel.pts));
+    ctx.restore();
+  } else {
+    const m = sel;
+    const d = ctx.getImageData(m.x, m.y, m.w, m.h);
+    for (let k = 0; k < m.mask.length; k++) if (m.mask[k]) d.data[k * 4 + 3] = 0;
+    ctx.putImageData(d, m.x, m.y);
+  }
+  showToast('Deleted — that area is transparent now.', 'success');
+}
+function annotSelFillColour() {
+  if (!_annot || !_annot.sel) return;
+  _annotSyncControls();
+  _annotPushHistory();
+  const sel = _annot.sel, colour = _annot.color;
+  _annotWithSelClip(c => {
+    c.fillStyle = colour;
+    if (sel.pts) c.fill(_annotSelPath(sel.pts));
+    else c.fillRect(sel.x, sel.y, sel.w, sel.h);
+  });
+  showToast('Selection filled.', 'success');
+}
+// "Fill from surroundings" — onion-peel inpainting: BFS inwards from the
+// selection edge, each unknown pixel takes the average of its already-known
+// neighbours. Fast, local, great for paper/flat backgrounds.
+function annotSelPatchFill(quiet) {
+  if (!_annot || !_annot.sel) return;
+  const m = _annotSelMask(); if (!m) return;
+  _annotPushHistory();
+  const ctx = _annot.ctx, W = _annot.canvas.width, H = _annot.canvas.height;
+  // Work on a box one pixel wider than the selection so the border ring is known.
+  const bx = Math.max(0, m.x - 1), by = Math.max(0, m.y - 1);
+  const bw = Math.min(W, m.x + m.w + 1) - bx, bh = Math.min(H, m.y + m.h + 1) - by;
+  const img = ctx.getImageData(bx, by, bw, bh), d = img.data;
+  const unknown = new Uint8Array(bw * bh);
+  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
+    if (m.mask[y * m.w + x]) unknown[(y + m.y - by) * bw + (x + m.x - bx)] = 1;
+  }
+  const queue = [];
+  const edge = k => {   // unknown pixel touching at least one known pixel
+    const x = k % bw, y = (k / bw) | 0;
+    return (x > 0 && !unknown[k - 1]) || (x < bw - 1 && !unknown[k + 1]) || (y > 0 && !unknown[k - bw]) || (y < bh - 1 && !unknown[k + bw]);
+  };
+  for (let k = 0; k < unknown.length; k++) if (unknown[k] && edge(k)) queue.push(k);
+  let qi = 0;
+  while (qi < queue.length) {
+    const k = queue[qi++];
+    if (!unknown[k]) continue;
+    const x = k % bw, y = (k / bw) | 0;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue;
+      const nk = ny * bw + nx;
+      if (unknown[nk]) continue;
+      const i = nk * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+    }
+    if (!n) continue;   // no known neighbour (selection spans the whole image edge) — leave as-is
+    const i = k * 4;
+    d[i] = r / n; d[i + 1] = g / n; d[i + 2] = b / n; d[i + 3] = 255;
+    unknown[k] = 0;
+    // enqueue unknown 4-neighbours
+    if (x > 0 && unknown[k - 1]) queue.push(k - 1);
+    if (x < bw - 1 && unknown[k + 1]) queue.push(k + 1);
+    if (y > 0 && unknown[k - bw]) queue.push(k - bw);
+    if (y < bh - 1 && unknown[k + bw]) queue.push(k + bw);
+  }
+  ctx.putImageData(img, bx, by);
+  if (!quiet) showToast('Filled from the surrounding texture.', 'success');
+}
+/* "Smart fill" — content-aware fill, done locally.
+   The Science app hands this job to an image model, which this app has no
+   backend for. What stands in its place is the onion-peel fill above run to
+   convergence and then RELAXED: repeated averaging passes over the filled
+   pixels only, which pulls the harsh radial streaks a single inward pass
+   leaves into a smooth continuation of the surrounding tone. On the thing
+   this is actually for — a mark, a stamp or a name lifted off printed paper —
+   the result is very close to what the AI fill produced, and it is instant,
+   offline and free.
+   Pixels outside the selection are never read back, so nothing else moves. */
+const ANNOT_SMART_FILL_PASSES = 24;
+function annotSelSmartFill() {
+  if (!_annot || !_annot.sel) { showToast('Select an area first, then fill it.', 'info'); return; }
+  const m = _annotSelMask(); if (!m) return;
+  annotSelPatchFill(true);                   // the base guess, and its own history step
+  const ctx = _annot.ctx, W = _annot.canvas.width, H = _annot.canvas.height;
+  const bx = Math.max(0, m.x - 1), by = Math.max(0, m.y - 1);
+  const bw = Math.min(W, m.x + m.w + 1) - bx, bh = Math.min(H, m.y + m.h + 1) - by;
+  if (bw < 1 || bh < 1) return;
+  const img = ctx.getImageData(bx, by, bw, bh), d = img.data;
+  const inside = new Uint8Array(bw * bh);
+  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
+    if (m.mask[y * m.w + x]) inside[(y + m.y - by) * bw + (x + m.x - bx)] = 1;
+  }
+  // Jacobi relaxation: every filled pixel becomes the mean of its four
+  // neighbours, read from the PREVIOUS pass so the sweep direction cannot bias
+  // the result. The unfilled ring around it holds the boundary fixed, which is
+  // what makes the patch meet the paper rather than fade to grey.
+  let prev = new Float32Array(bw * bh * 3);
+  for (let k = 0; k < bw * bh; k++) { prev[k * 3] = d[k * 4]; prev[k * 3 + 1] = d[k * 4 + 1]; prev[k * 3 + 2] = d[k * 4 + 2]; }
+  let next = new Float32Array(prev);
+  for (let pass = 0; pass < ANNOT_SMART_FILL_PASSES; pass++) {
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      const k = y * bw + x;
+      if (!inside[k]) continue;
+      let r = 0, g = 0, b = 0, n = 0;
+      if (x > 0) { const j = (k - 1) * 3; r += prev[j]; g += prev[j + 1]; b += prev[j + 2]; n++; }
+      if (x < bw - 1) { const j = (k + 1) * 3; r += prev[j]; g += prev[j + 1]; b += prev[j + 2]; n++; }
+      if (y > 0) { const j = (k - bw) * 3; r += prev[j]; g += prev[j + 1]; b += prev[j + 2]; n++; }
+      if (y < bh - 1) { const j = (k + bw) * 3; r += prev[j]; g += prev[j + 1]; b += prev[j + 2]; n++; }
+      if (!n) continue;
+      const o = k * 3;
+      next[o] = r / n; next[o + 1] = g / n; next[o + 2] = b / n;
+    }
+    const swap = prev; prev = next; next = swap;
+  }
+  for (let k = 0; k < bw * bh; k++) {
+    if (!inside[k]) continue;
+    const i = k * 4, o = k * 3;
+    d[i] = prev[o]; d[i + 1] = prev[o + 1]; d[i + 2] = prev[o + 2]; d[i + 3] = 255;
+  }
+  ctx.putImageData(img, bx, by);
+  showToast('Smart fill applied — Undo puts it back.', 'success');
+}
+function _annotDown(e) {
+  if (!_annot) return;
+  e.preventDefault();
+  _annotSyncControls();
+  const p = _annotPt(e), ctx = _annot.ctx;
+  if (_annot.tool === 'text') { _annotPlaceText(p); return; }
+  if (_annot.tool === 'fill') { _annotPushHistory(); _annotFloodFill(p.x, p.y); return; }
+  if (_annot.tool === 'wand') {
+    const m = _annotMagicWand(p.x, p.y, e.altKey);
+    if (!m) { showToast('Nothing matched there — try a bigger ±', 'info'); return; }
+    m.outline = _annotMaskOutline(m);
+    _annot.sel = m;
+    _annotSelSyncBar();
+    showToast(m.count.toLocaleString() + ' pixels selected' + (e.altKey ? ' across the whole picture' : '') +
+      ' — fill it, move it, or widen the ± slider', 'info');
+    return;
+  }
+  if (_annot.tool === 'scale') {
+    if (!_annot.xform) _annotXformBegin();
+    const x = _annot.xform; if (!x) return;
+    const h = _annotXformHandleAt(p);
+    if (h) { _annotXformScaleStart(h); _annot.start = p; _annot.drawing = true; return; }
+    // Not on a handle: dragging the middle of the box slides the object.
+    if (_annotXformInside(p)) { _annot.start = p; _annot.xfMove = true; _annot.drawing = true; return; }
+    showToast('Drag a corner or edge handle to resize — or inside the box to move it', 'info');
+    return;
+  }
+  if (_annot.tool === 'rotate' || _annot.tool === 'skew') {
+    if (!_annot.xform) _annotXformBegin();
+    const x = _annot.xform; if (!x) return;
+    if (x.straighten) { x.strLine = { from: p, to: p }; _annot.drawing = true; return; }
+    _annot.start = p;
+    _annot.xfStart = { angle: x.angle, skewX: x.skewX, skewY: x.skewY, ang0: Math.atan2(p.y - x.cy, p.x - x.cx) };
+    _annot.drawing = true;
+    return;
+  }
+  if (_annot.tool === 'move') {
+    if (!_annot.sel) { showToast('Select an area first (⬚, ➰ or 🪄), then drag it with Move', 'info'); return; }
+    _annotPushHistory();
+    _annot.float = _annotSelLift(e.altKey);
+    if (!_annot.float) return;
+    _annot.start = p;
+    _annot.drawing = true;
+    return;
+  }
+  if (_annot.tool === 'history') {
+    _annotPushHistory();
+    _annot.drawing = true;
+    _annot.last = p;
+    _annotHistoryDab(p.x, p.y);
+    return;
+  }
+  if (_annot.tool === 'select' || _annot.tool === 'lasso') {
+    _annot.sel = null; _annotSelSyncBar();
+    _annot.selPts = _annot.tool === 'select' ? [p, p, p, p] : [p];
+    _annot.start = p;
+    _annot.drawing = true;
+    return;
+  }
+  if (_annot.tool === 'clone') {
+    // First click (or Alt+click) sets the source; later drags stamp from it.
+    if (e.altKey || !_annot.cloneSrc) {
+      _annot.cloneSrc = { x: p.x, y: p.y };
+      _annotUpdateCloneMarker();
+      showToast('Clone source set — now drag to stamp that area elsewhere', 'info');
+      return;
+    }
+    _annotPushHistory();
+    const snap = document.createElement('canvas');
+    snap.width = _annot.canvas.width; snap.height = _annot.canvas.height;
+    snap.getContext('2d').drawImage(_annot.canvas, 0, 0);
+    _annot.cloneSnap = snap;
+    _annot.cloneOff = { x: p.x - _annot.cloneSrc.x, y: p.y - _annot.cloneSrc.y };
+    _annot.drawing = true;
+    _annot.last = p;
+    _annotCloneDab(ctx, p.x, p.y);
+    return;
+  }
+  _annotPushHistory();
+  if (_annot.tool === 'line') {
+    _annot.start = p;
+    _annot.snap = ctx.getImageData(0, 0, _annot.canvas.width, _annot.canvas.height);
+    _annot.drawing = true;
+    return;
+  }
+  // erase / paint brush
+  // Photoshop straight-line join: click once, then Shift-click somewhere else —
+  // the two points are connected with one straight stroke.
+  if (e.shiftKey && _annot.anchor) {
+    _annotBrushLine(_annot.anchor, p);
+    _annot.drawing = true;
+    _annot.last = p;
+    _annot.shiftSeg = null;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    return;
+  }
+  _annot.drawing = true;
+  _annot.last = p;
+  _annot.shiftSeg = null; // Shift-straight segment state (start pt + snapshot)
+  // Brush size is measured in IMAGE pixels (Photoshop-style): size 1 = one pixel,
+  // independent of the current zoom, so precise edits are possible when zoomed in.
+  const lw = Math.max(1, Math.round(_annot.size));
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // The mode is set for the WHOLE stroke — the drag carries on in pointermove
+  // against this same context — and _annotUp puts it back.
+  _annotPaintCompose(ctx);
+  ctx.lineWidth = lw;
+  if (lw <= 1) {
+    // A 1px brush paints a crisp single pixel (no anti-aliasing) — pixel-perfect.
+    ctx.fillRect(Math.floor(p.x), Math.floor(p.y), 1, 1);
+  } else {
+    ctx.beginPath(); ctx.arc(p.x, p.y, lw / 2, 0, Math.PI * 2); ctx.fill(); // a click paints a dot
+  }
+  ctx.beginPath(); ctx.moveTo(p.x, p.y);
+}
+function _annotMove(e) {
+  if (!_annot || !_annot.drawing) return;
+  e.preventDefault();
+  const p = _annotPt(e), ctx = _annot.ctx;
+  if (_annot.tool === 'scale') {
+    if (_annot.xfScale) { _annotXformScaleDrag(p, e.shiftKey); return; }
+    if (_annot.xfMove && _annot.start) {
+      let dx = p.x - _annot.start.x, dy = p.y - _annot.start.y;
+      if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }   // Shift = straight
+      _annotXformMoveTo(dx, dy);
+      _annot.start = p;
+    }
+    return;
+  }
+  if (_annot.tool === 'rotate' || _annot.tool === 'skew') {
+    const x = _annot.xform; if (!x) return;
+    if (x.straighten) { if (x.strLine) x.strLine.to = p; return; }   // the guide is drawn by the ants loop
+    if (!_annot.xfStart) return;
+    if (_annot.tool === 'rotate') {
+      const a = Math.atan2(p.y - x.cy, p.x - x.cx);
+      let deg = _annot.xfStart.angle + (a - _annot.xfStart.ang0) * 180 / Math.PI;
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15;   // Shift snaps to 15°, like every transform tool
+      x.angle = _annotWrapDeg(deg);
+    } else {
+      // Drag sideways to slant sideways, up/down to slant up/down. A drag across
+      // half the picture is 45° of slant; Shift locks to one axis.
+      let dx = p.x - _annot.start.x, dy = p.y - _annot.start.y;
+      if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
+      const spanX = Math.max(40, _annot.canvas.height / 2), spanY = Math.max(40, _annot.canvas.width / 2);
+      x.skewX = _annotClampNum(_annot.xfStart.skewX + dx / spanX * 45, -60, 60);
+      x.skewY = _annotClampNum(_annot.xfStart.skewY + dy / spanY * 45, -60, 60);
+    }
+    _annotXformSyncBar();
+    _annotXformPreview();
+    return;
+  }
+  if (_annot.tool === 'move') {
+    if (!_annot.float) return;
+    let dx = p.x - _annot.start.x, dy = p.y - _annot.start.y;
+    if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }   // Shift = straight
+    _annot.float.dx = Math.round(dx); _annot.float.dy = Math.round(dy);
+    _annotFloatDraw();
+    return;
+  }
+  if (_annot.tool === 'history') { _annotHistoryStroke(_annot.last, p); _annot.last = p; return; }
+  if (_annot.tool === 'select' || _annot.tool === 'lasso') {
+    if (!_annot.selPts) return;
+    if (_annot.tool === 'select') {
+      const s = _annot.start, q = e.shiftKey ? _annotSquarePt(s, p) : p;   // Shift = square, like Photoshop
+      _annot.selPts = [s, { x: q.x, y: s.y }, q, { x: s.x, y: q.y }];
+    } else {
+      _annot.selPts.push(p);
+    }
+    return;
+  }
+  if (_annot.tool === 'clone') { _annotCloneStroke(_annot.last, p); _annot.last = p; return; }
+  if (_annot.tool === 'line') {
+    const end = e.shiftKey ? _annotSnap45(_annot.start, p) : p;
+    ctx.putImageData(_annot.snap, 0, 0);
+    ctx.strokeStyle = _annot.color; ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(1, Math.round(_annot.size));
+    ctx.beginPath(); ctx.moveTo(_annot.start.x, _annot.start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+    return;
+  }
+  // Hold Shift while erasing/painting: the stroke is locked to the horizontal
+  // or vertical axis (whichever is dominant), live-previewed by restoring the
+  // snapshot — just like Photoshop's Shift-drag brush.
+  if (e.shiftKey) {
+    if (!_annot.shiftSeg) {
+      _annot.shiftSeg = {
+        start: _annot.last,
+        snap: ctx.getImageData(0, 0, _annot.canvas.width, _annot.canvas.height)
+      };
+    }
+    const s = _annot.shiftSeg.start;
+    const q = _annotSnapAxis(s, p);
+    ctx.putImageData(_annot.shiftSeg.snap, 0, 0);
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(q.x, q.y);
+    _annot.last = q;
+    return;
+  }
+  if (_annot.shiftSeg) {
+    // Shift released mid-stroke — the straight segment stays; carry on
+    // freehand from its end.
+    _annot.shiftSeg = null;
+    ctx.beginPath(); ctx.moveTo(_annot.last.x, _annot.last.y);
+  }
+  if (Math.max(1, Math.round(_annot.size)) <= 1) {
+    // Pixel-perfect 1px drag: plot crisp pixels between samples.
+    _annotPlotLine(ctx, _annot.last.x, _annot.last.y, p.x, p.y);
+  } else {
+    ctx.lineTo(p.x, p.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+  }
+  _annot.last = p;
+}
+function _annotUp() {
+  if (!_annot) return;
+  if (_annot.xform && _annot.tool === 'scale') {
+    // The box has moved or changed size, so the pivot goes back to its middle —
+    // otherwise a turn afterwards swings the object round a point off to one side.
+    if (_annot.xfScale || _annot.xfMove) _annotXformRecentre(_annot.xform);
+    _annot.xfScale = null; _annot.xfMove = false;
+    _annot.drawing = false; _annot.start = null;
+    _annotXformSyncBar();
+    return;
+  }
+  if (_annot.xform && (_annot.tool === 'rotate' || _annot.tool === 'skew')) {
+    if (_annot.xform.straighten && _annot.xform.strLine) _annotXformStraightenFinish();
+    _annot.drawing = false; _annot.start = null; _annot.xfStart = null;
+    return;
+  }
+  if (_annot.float) {
+    _annotFloatCommit();
+    _annot.drawing = false; _annot.start = null; _annot.last = null;
+    return;
+  }
+  if (_annot.drawing && _annot.selPts && (_annot.tool === 'select' || _annot.tool === 'lasso')) {
+    // Finalise the selection: keep it only if it has real area.
+    const pts = _annot.selPts;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pts.forEach(q => { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); });
+    _annot.sel = (pts.length >= 3 && (x1 - x0) >= 3 && (y1 - y0) >= 3) ? { pts: pts.slice() } : null;
+    _annot.selPts = null;
+    _annotSelSyncBar();
+    if (_annot.sel) showToast('Area selected — pick a fill option above the image', 'info');
+  }
+  // Remember where the brush stroke ended — a later Shift-click continues from
+  // here with a straight line (Photoshop behaviour).
+  if ((_annot.tool === 'erase' || _annot.tool === 'paint') && _annot.last) _annot.anchor = _annot.last;
+  _annotResetCompose();
+  _annot.drawing = false; _annot.start = null; _annot.snap = null; _annot.shiftSeg = null; _annot.last = null; _annot.cloneSnap = null; _annot.cloneOff = null;
+}
+/* ==========================================================================
+   THE TEXT TOOL
+   ==========================================================================
+   Three things about a label are different here from the editor this was
+   ported from, and all three come from the same complaint: placing words on a
+   page is a matter of a pixel or two, and the old label made you guess.
+
+   1. IT IS PINNED TO THE PICTURE, NOT THE WINDOW. A label carries its position
+      in CANVAS pixels (`ax`, `ay`) and is laid out from them on every zoom and
+      pan, at a font size scaled by the same factor — so what is on screen is
+      what will be burned in, at any zoom. Burning in is then one `fillText` at
+      (ax, ay) rather than an arithmetic guess at where the input's border and
+      padding put the first glyph.
+
+   2. IT DRAGS FROM ANYWHERE, WITH NO BUTTON TO PRESS FIRST. Pointer-down
+      anywhere on the label arms a drag; moving more than ANNOT_TEXT_DRAG_SLOP
+      screen pixels starts it, and letting go without moving that far is a
+      plain click that puts the caret where it was clicked. So dragging and
+      typing are the same gesture until the pointer says which one it was —
+      no modal Move tool, no 6px handle to hunt for.
+
+   3. YOU CAN SEE WHAT IS UNDERNEATH IT. The box has no fill of its own, only
+      a hairline dashed rule, and while it is being dragged two guides run the
+      full width and height of the stage through its origin with the position
+      shown beside them. Lining a caption up with a printed rule, a column edge
+      or the label above it is then something you can SEE rather than nudge and
+      re-check.
+   ========================================================================== */
+const ANNOT_TEXT_DRAG_SLOP = 3;   // screen px of movement before a click becomes a drag
+
+/** Every live label, laid out from its canvas position at the current zoom. */
+function _annotLayoutTextBoxes() {
+  if (!_annot) return;
+  const stage = document.getElementById('annotStage');
+  if (!stage) return;
+  const s = _annotDisplayScale();
+  stage.querySelectorAll('.annot-textbox').forEach(function (box) {
+    box.style.left = (_annot.panX + box._ax * s) + 'px';
+    box.style.top = (_annot.panY + box._ay * s) + 'px';
+    const field = box.querySelector('.annot-textbox-input');
+    if (field) {
+      const px = Math.max(ANNOT_TEXT_MIN_PX, box._size * s);
+      field.style.font = _annotFontString(box._text, px);
+      field.style.lineHeight = ANNOT_TEXT_LINE_HEIGHT;
+      field.style.color = box._text.color || _annot.color;
+    }
+    const handle = box.querySelector('.annot-textbox-handle');
+    if (handle) handle.style.top = '-19px';
+  });
+}
+
+/** The two placement guides + the readout, shown only while a label is moving. */
+function _annotShowGuides(box) {
+  const stage = document.getElementById('annotStage');
+  if (!stage || !_annot) return;
+  let h = stage.querySelector('.annot-guide.h'), v = stage.querySelector('.annot-guide.v'),
+      tag = stage.querySelector('.annot-guide-tag');
+  if (!h) { h = document.createElement('div'); h.className = 'annot-guide h'; stage.appendChild(h); }
+  if (!v) { v = document.createElement('div'); v.className = 'annot-guide v'; stage.appendChild(v); }
+  if (!tag) { tag = document.createElement('div'); tag.className = 'annot-guide-tag'; stage.appendChild(tag); }
+  const s = _annotDisplayScale();
+  const left = _annot.panX + box._ax * s, top = _annot.panY + box._ay * s;
+  h.style.display = v.style.display = tag.style.display = 'block';
+  h.style.top = top + 'px';
+  v.style.left = left + 'px';
+  tag.style.left = (left + 8) + 'px';
+  tag.style.top = Math.max(2, top - 24) + 'px';
+  tag.textContent = Math.round(box._ax) + ', ' + Math.round(box._ay) + ' px';
+}
+
+function _annotHideGuides() {
+  const stage = document.getElementById('annotStage');
+  if (!stage) return;
+  stage.querySelectorAll('.annot-guide, .annot-guide-tag').forEach(function (el) { el.style.display = 'none'; });
+}
+
+/** Push the toolbar's current font settings onto the label being edited. */
+function annotTextRestyleLive() {
+  if (!_annot) return;
+  const stage = document.getElementById('annotStage');
+  if (!stage) return;
+  stage.querySelectorAll('.annot-textbox').forEach(function (box) {
+    box._text = Object.assign({}, _annot.text, { color: _annot.color });
+    box._size = _annot.text.size;
+    const handle = box.querySelector('.annot-textbox-handle');
+    if (handle) handle.textContent = _annot.text.label + ' · ' + Math.round(_annot.text.size) + ' px';
+  });
+  _annotLayoutTextBoxes();
+}
+
+/** The toolbar's own text row, kept in step with the session. */
+function _annotSyncTextBar() {
+  if (!_annot) return;
+  const family = document.getElementById('annotFont');
+  if (family) {
+    if (!family.options.length) {
+      ANNOT_FONTS.forEach(function (entry) {
+        const option = document.createElement('option');
+        option.value = entry.css;
+        option.textContent = entry.label;
+        option.style.fontFamily = entry.css;
+        family.appendChild(option);
+      });
+    }
+    family.value = _annot.text.family;
+    family.style.fontFamily = _annot.text.family;
+  }
+  const size = document.getElementById('annotFontSize');
+  if (size && document.activeElement !== size) size.value = Math.round(_annot.text.size);
+  const bold = document.getElementById('annotFontBold');
+  if (bold) bold.classList.toggle('active', !!_annot.text.bold);
+  const italic = document.getElementById('annotFontItalic');
+  if (italic) italic.classList.toggle('active', !!_annot.text.italic);
+}
+
+/** The toolbar controls. Each one restyles the label already being typed, so
+    a font can be tried on the words themselves rather than chosen blind. */
+function annotTextSetFont(cssStack) {
+  if (!_annot) return;
+  const entry = ANNOT_FONTS.find(function (row) { return row.css === cssStack; });
+  _annot.text.family = cssStack;
+  _annot.text.label = entry ? entry.label : 'Custom';
+  _annotEnsureFont(_annot.text, _annot.text.size);
+  _annotSyncTextBar();
+  annotTextRestyleLive();
+}
+
+function annotTextSetSize(value) {
+  if (!_annot) return;
+  const wanted = parseFloat(value);
+  _annot.text.size = _annotClampNum(isNaN(wanted) ? _annot.text.size : wanted, ANNOT_TEXT_MIN_PX, 600);
+  _annotSyncTextBar();
+  annotTextRestyleLive();
+}
+
+function annotTextToggle(field) {
+  if (!_annot) return;
+  _annot.text[field] = !_annot.text[field];
+  _annotEnsureFont(_annot.text, _annot.text.size);
+  _annotSyncTextBar();
+  annotTextRestyleLive();
+}
+
+/** Drop a label at a canvas point and open it for typing. */
+function _annotPlaceText(p) {
+  const stage = document.getElementById('annotStage');
+  if (!stage || !_annot) return;
+  const text = Object.assign({}, _annot.text, { color: _annot.color });
+  _annotEnsureFont(text, text.size);
+
+  const box = document.createElement('div');
+  box.className = 'annot-textbox';
+  box._ax = p.x; box._ay = p.y;             // CANVAS pixels — the whole point
+  box._text = text; box._size = text.size;
+
+  const handle = document.createElement('div');
+  handle.className = 'annot-textbox-handle';
+  handle.textContent = text.label + ' · ' + Math.round(text.size) + ' px';
+
+  /* contenteditable rather than an <input>: it sizes itself to the words as
+     they are typed (an input is a fixed box that hides the picture beside it),
+     it can hold more than one line, and its top-left corner is the top-left of
+     the text with no border or padding in between. */
+  const field = document.createElement('div');
+  field.className = 'annot-textbox-input';
+  field.setAttribute('contenteditable', 'true');
+  field.setAttribute('spellcheck', 'false');
+  field.style.color = _annot.color;
+
+  box.appendChild(handle);
+  box.appendChild(field);
+  stage.appendChild(box);
+  _annotLayoutTextBoxes();
+  setTimeout(function () { field.focus(); }, 0);
+
+  /* ---- Free dragging ----------------------------------------------------
+     Pointer-down anywhere on the label ARMS a drag but does not start one, and
+     nothing is prevented — so a plain click still lands the caret where it was
+     clicked. Only once the pointer has travelled far enough does it become a
+     move, at which point the pointer is captured and the caret left alone. */
+  let armed = null, dragging = false;
+  const arm = function (event, element) {
+    if (event.button !== 0) return;
+    armed = {
+      element: element, id: event.pointerId,
+      clientX: event.clientX, clientY: event.clientY,
+      ax: box._ax, ay: box._ay
+    };
+  };
+  const track = function (event) {
+    if (!armed || event.pointerId !== armed.id) return;
+    const dx = event.clientX - armed.clientX, dy = event.clientY - armed.clientY;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < ANNOT_TEXT_DRAG_SLOP) return;
+      dragging = true;
+      box.classList.add('dragging');
+      try { armed.element.setPointerCapture(armed.id); } catch (captureError) {}
+    }
+    event.preventDefault();
+    const s = _annotDisplayScale() || 1;
+    box._ax = armed.ax + dx / s;
+    box._ay = armed.ay + dy / s;
+    if (event.shiftKey) {                    // Shift locks the move to one axis
+      if (Math.abs(dx) >= Math.abs(dy)) box._ay = armed.ay; else box._ax = armed.ax;
+    }
+    _annotLayoutTextBoxes();
+    _annotShowGuides(box);
+  };
+  const release = function (event) {
+    if (!armed) return;
+    const wasDragging = dragging;
+    try { armed.element.releasePointerCapture(armed.id); } catch (captureError) {}
+    armed = null; dragging = false;
+    box.classList.remove('dragging');
+    _annotHideGuides();
+    if (wasDragging) { event.preventDefault(); field.focus(); }
+  };
+  [handle, field].forEach(function (element) {
+    element.addEventListener('pointerdown', function (event) { event.stopPropagation(); arm(event, element); });
+    element.addEventListener('pointermove', track);
+    element.addEventListener('pointerup', release);
+    element.addEventListener('pointercancel', release);
+  });
+
+  /* ---- Burning it in ----------------------------------------------------
+     One fillText per line at the label's own canvas position, in the same
+     font the box was showing. `textBaseline` is 'top', so the half-leading
+     CSS puts above the first line has to be added back or the words land
+     slightly high — the one place the live box and the canvas could drift. */
+  let done = false;
+  const commit = function () {
+    if (done) return; done = true;
+    const lines = String(field.innerText || '').replace(/ /g, ' ').split(/\r?\n/);
+    const hasWords = lines.some(function (line) { return line.trim() !== ''; });
+    /* Drawn SYNCHRONOUSLY, deliberately. Every caller of this — Apply, a
+       transform starting, a paste landing — reads or replaces the canvas on
+       the very next line, so a label that painted itself in a `.then` would
+       either miss the export or land on top of a picture that had moved on.
+       The face was requested when the label was created and again whenever the
+       toolbar changed, so by the time anything has been typed it is loaded. */
+    if (hasWords && _annot) {
+      _annotPushHistory();
+      const ctx = _annot.ctx;
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = box._text.color || _annot.color;
+      ctx.textBaseline = 'top';
+      ctx.font = _annotFontString(box._text, box._size);
+      const lineHeight = box._size * ANNOT_TEXT_LINE_HEIGHT;
+      const halfLeading = (lineHeight - box._size) / 2;
+      lines.forEach(function (line, index) {
+        if (line === '') return;
+        ctx.fillText(line, box._ax, box._ay + halfLeading + index * lineHeight);
+      });
+      ctx.restore();
+    }
+    _annotHideGuides();
+    if (box.parentNode) box.parentNode.removeChild(box);
+  };
+  box._commit = commit;
+
+  field.addEventListener('keydown', function (event) {
+    /* Enter finishes the label; Shift+Enter starts a second line, which is the
+       habit every drawing program has taught. */
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); commit(); return; }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      done = true;
+      _annotHideGuides();
+      if (box.parentNode) box.parentNode.removeChild(box);
+      return;
+    }
+    event.stopPropagation();               // arrow keys and letters belong to the label
+  });
+  field.addEventListener('blur', function () { if (!armed && !dragging) commit(); });
+}
+
+/** Settle every label that is still open — called before anything that
+    redraws or resizes the canvas underneath them. */
+function _annotCommitTextBoxes() {
+  document.querySelectorAll('#annotStage .annot-textbox').forEach(function (box) {
+    if (typeof box._commit === 'function') box._commit();
+  });
+}
+/* ==========================================================================
+   APPLY — the touched-up pixels become the page
+   ==========================================================================
+   The editor works on the page as the user SEES it, rotation and all, because
+   drawing on a sideways page would be absurd. What is stored is the opposite:
+   the raster turned back to the page's own unrotated orientation, which is the
+   space pdf-lib draws in and the space the page keeps whatever it is rotated
+   to afterwards. Turn the page 90° next week and the touch-up turns with it.
+
+   The alpha is flattened onto white on the way out. The ▨ setting exists so a
+   selection can be cut cleanly, but a PDF page is paper — a hole in it would
+   export as black in some viewers and white in others. */
+function _annotFlattenOntoWhite(sourceCanvas) {
+  const flat = document.createElement('canvas');
+  flat.width = sourceCanvas.width;
+  flat.height = sourceCanvas.height;
+  const flatContext = flat.getContext('2d');
+  flatContext.fillStyle = '#FFFFFF';
+  flatContext.fillRect(0, 0, flat.width, flat.height);
+  flatContext.drawImage(sourceCanvas, 0, 0);
+  return flat;
+}
+
+/* The paper does not change shape, so neither may the raster.
+   Straightening a crooked scan turns the WHOLE picture with "grow to fit" on,
+   which makes the canvas bigger and, at any angle that is not a right angle, a
+   DIFFERENT SHAPE from the page. Exported as-is it would be stretched to the
+   page box and everything on it would be subtly squashed. So a raster whose
+   proportions have drifted is scaled to fit inside the page's own proportions
+   and centred on white — the whole picture kept, nothing distorted, the extra
+   showing as a thin white margin exactly where the turn opened one up. */
+const ANNOT_ASPECT_SLACK = 0.005;   // half a percent: rounding, not a real change
+function _annotFitToPageAspect(sourceCanvas, pageEntry) {
+  const pageAspect = pageEntry.pointWidth / Math.max(1, pageEntry.pointHeight);
+  const rasterAspect = sourceCanvas.width / Math.max(1, sourceCanvas.height);
+  if (Math.abs(rasterAspect - pageAspect) <= pageAspect * ANNOT_ASPECT_SLACK) { return sourceCanvas; }
+
+  const fitted = document.createElement('canvas');
+  if (rasterAspect > pageAspect) {
+    fitted.width = sourceCanvas.width;
+    fitted.height = Math.max(1, Math.round(sourceCanvas.width / pageAspect));
+  } else {
+    fitted.height = sourceCanvas.height;
+    fitted.width = Math.max(1, Math.round(sourceCanvas.height * pageAspect));
+  }
+
+  const scale = Math.min(fitted.width / sourceCanvas.width, fitted.height / sourceCanvas.height);
+  const drawWidth = sourceCanvas.width * scale, drawHeight = sourceCanvas.height * scale;
+  const fittedContext = fitted.getContext('2d');
+  fittedContext.fillStyle = '#FFFFFF';
+  fittedContext.fillRect(0, 0, fitted.width, fitted.height);
+  fittedContext.imageSmoothingEnabled = true;
+  try { fittedContext.imageSmoothingQuality = 'high'; } catch (smoothingError) {}
+  fittedContext.drawImage(sourceCanvas, (fitted.width - drawWidth) / 2, (fitted.height - drawHeight) / 2, drawWidth, drawHeight);
+  return fitted;
+}
+
+/** Turn a canvas by a multiple of 90°, returning a new one. */
+function rotateCanvasBy(sourceCanvas, degrees) {
+  const angle = normaliseRotation(degrees);
+  if (angle === 0) { return sourceCanvas; }
+
+  const swapsAxes = angle === 90 || angle === 270;
+  const turned = document.createElement('canvas');
+  turned.width = swapsAxes ? sourceCanvas.height : sourceCanvas.width;
+  turned.height = swapsAxes ? sourceCanvas.width : sourceCanvas.height;
+
+  const turnedContext = turned.getContext('2d');
+  turnedContext.translate(turned.width / 2, turned.height / 2);
+  turnedContext.rotate(angle * Math.PI / 180);
+  turnedContext.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
+  return turned;
+}
+
+async function applyAnnotTool() {
+  if (!_annot) { return; }
+
+  /* Settle everything still open, in the order the editor would: a live
+     transform first, then any label still being typed on top of it. */
+  if (_annot.xform) { annotXformApply(true); }
+  _annotCommitTextBoxes();
+
+  const pageId = _annot.pageId;
+  const displayRotation = normaliseRotation(_annot.pageRotation);
+  const flattened = _annotFlattenOntoWhite(_annot.canvas);
+  /* Back to the page's own orientation: the editor rendered it turned BY the
+     rotation, so storing it means turning it back the other way. */
+  const unrotated = rotateCanvasBy(flattened, -displayRotation);
+
+  closeAnnotTool();
+
+  const targetIndex = findPageIndexById(pageId);
+  if (targetIndex === -1) {
+    showToast('That page is no longer in the document, so the touch-up was not saved.', 'error');
+    return;
+  }
+
+  const stored = _annotFitToPageAspect(unrotated, pageList[targetIndex]);
+  const dataUrl = stored.toDataURL('image/png');
+  const rasterWidth = stored.width;
+  const rasterHeight = stored.height;
+
+  pushHistorySnapshot();
+  /* The descriptor is REPLACED, never mutated: the undo stack holds shallow
+     copies of these objects, so editing one in place would rewrite history. */
+  pageList[targetIndex] = Object.assign({}, pageList[targetIndex], {
+    touchUp: {
+      id: createUniqueId('touchup'),
+      dataUrl: dataUrl,
+      pixelWidth: rasterWidth,
+      pixelHeight: rasterHeight
+    }
+  });
+
+  renderEverything();
+  if (currentMode === 'text' && pageList[editorPageIndex] &&
+      pageList[editorPageIndex].uniqueId === pageId) {
+    openEditorPage(editorPageIndex);
+  }
+  showToast('Touch-up applied to page ' + (targetIndex + 1) + '.', 'success');
+}
+
+/** The footer button: drop the touch-up on the page currently open. */
+function removeTouchUpFromEditor() {
+  if (!_annot) { return; }
+  const pageId = _annot.pageId;
+  closeAnnotTool();
+  clearTouchUpForPage(pageId);
+}
+
+/** Throw a page's touch-up away and go back to the original page content. */
+function clearTouchUpForPage(uniqueId) {
+  const targetIndex = findPageIndexById(uniqueId);
+  if (targetIndex === -1 || !pageList[targetIndex].touchUp) { return; }
+
+  pushHistorySnapshot();
+  const withoutRaster = Object.assign({}, pageList[targetIndex]);
+  delete withoutRaster.touchUp;
+  pageList[targetIndex] = withoutRaster;
+
+  renderEverything();
+  showToast('Touch-up removed from page ' + (targetIndex + 1) + '.');
+}
+
+/* ==========================================================================
+   OPENING THE EDITOR ON A PAGE
+   ==========================================================================
+   The raster is rendered fresh from the source PDF at TOUCH_UP_RENDER_WIDTH,
+   which is a compromise with two ends to it: too coarse and the touch-up is
+   visibly softer than the type around it once it is printed; too fine and the
+   undo snapshots (a full ImageData each) start costing tens of megabytes.
+   ~1800px across A4 is about 220dpi, which prints cleanly.
+
+   A page already touched up re-opens on ITS OWN raster, not on a fresh render,
+   so a second visit continues the first rather than throwing it away. */
+const TOUCH_UP_RENDER_WIDTH = 1800;
+
+/** The stored raster, turned to face the way the page is facing now. Every
+    surface that has to SHOW a touched-up page goes through this — the grid
+    thumbnail, the preview, the text-mode canvas and the editor re-opening on
+    its own work — so none of them can disagree about which way is up. */
+async function touchUpFacingCanvas(pageEntry) {
+  const storedImage = await _loadImageEl(pageEntry.touchUp.dataUrl);
+  const flat = document.createElement('canvas');
+  flat.width = storedImage.naturalWidth || storedImage.width;
+  flat.height = storedImage.naturalHeight || storedImage.height;
+  flat.getContext('2d').drawImage(storedImage, 0, 0);
+  return rotateCanvasBy(flat, normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation));
+}
+
+async function renderPageForTouchUp(pageEntry) {
+  const totalRotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+
+  /* Already touched up: re-open on the page's OWN raster rather than on a
+     fresh render, so a second visit continues the first instead of quietly
+     throwing it away. */
+  if (pageEntry.touchUp) { return (await touchUpFacingCanvas(pageEntry)).toDataURL('image/png'); }
+
+  const sourceRecord = pageEntry.sourceId ? sourceLibrary.get(pageEntry.sourceId) : null;
+  const offscreenCanvas = document.createElement('canvas');
+
+  if (pageEntry.isBlank || !sourceRecord) {
+    const displayed = displayedPageSize(pageEntry);
+    const renderScale = TOUCH_UP_RENDER_WIDTH / Math.max(1, displayed.width);
+    offscreenCanvas.width = Math.max(1, Math.round(displayed.width * renderScale));
+    offscreenCanvas.height = Math.max(1, Math.round(displayed.height * renderScale));
+    const blankContext = offscreenCanvas.getContext('2d');
+    blankContext.fillStyle = '#FFFFFF';
+    blankContext.fillRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+    return offscreenCanvas.toDataURL('image/png');
+  }
+
+  const pdfjsPage = await sourceRecord.pdfjsDocument.getPage(pageEntry.sourcePageIndex + 1);
+  const unitViewport = pdfjsPage.getViewport({ scale: 1, rotation: totalRotation });
+  const renderScale = TOUCH_UP_RENDER_WIDTH / unitViewport.width;
+  const scaledViewport = pdfjsPage.getViewport({ scale: renderScale, rotation: totalRotation });
+
+  offscreenCanvas.width = Math.max(1, Math.floor(scaledViewport.width));
+  offscreenCanvas.height = Math.max(1, Math.floor(scaledViewport.height));
+
+  const drawingContext = offscreenCanvas.getContext('2d');
+  drawingContext.fillStyle = '#FFFFFF';
+  drawingContext.fillRect(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+  await pdfjsPage.render({ canvasContext: drawingContext, viewport: scaledViewport }).promise;
+
+  return offscreenCanvas.toDataURL('image/png');
+}
+
+async function openTouchUpForPage(uniqueId) {
+  const targetIndex = findPageIndexById(uniqueId);
+  if (targetIndex === -1) { return; }
+
+  const pageEntry = pageList[targetIndex];
+  /* The footer's Remove button only means anything for a page that already
+     carries a raster, so it is set before the editor opens rather than being
+     left on show doing nothing. */
+  const removeButton = getElement('annotRemoveButton');
+  removeButton.style.display = pageEntry.touchUp ? 'inline-flex' : 'none';
+
+  openProgressOverlay('Rendering page ' + (targetIndex + 1) + ' for touch-up…');
+
+  try {
+    const dataUrl = await renderPageForTouchUp(pageEntry);
+    closeProgressOverlay();
+    _annotOpenSrc(
+      Promise.resolve(dataUrl),
+      {
+        pageId: pageEntry.uniqueId,
+        pageRotation: normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation)
+      },
+      'Touch up — page ' + (targetIndex + 1)
+    );
+  } catch (renderError) {
+    console.error('Touch-up render failed', renderError);
+    closeProgressOverlay();
+    showToast('Could not render that page for touch-up.', 'error');
+  }
+}
+function closeAnnotTool() {
+  const o = document.getElementById('annotOverlay'); if (o) o.classList.remove('is-open');
+  const s = document.getElementById('annotStage');
+  if (s) s.querySelectorAll('.annot-textbox, .annot-guide, .annot-guide-tag').forEach(el => el.remove());
+  const cm = document.getElementById('annotCloneSrc'); if (cm) cm.remove();
+  const br = document.getElementById('annotBrushRing'); if (br) br.remove();
+  const bh = document.getElementById('annotBrushHud'); if (bh) bh.remove();
+  if (_annot) clearTimeout(_annot.hudTimer);
+  const sc = document.getElementById('annotSelCanvas'); if (sc) sc.getContext('2d').clearRect(0, 0, sc.width, sc.height);
+  _annotUnbindZoomListeners();
+  _annot = null;
+  _annotSelSyncBar();
+  _annotXformSyncBar();
+}
+document.addEventListener('click', function (e) {
+  const t = e.target.closest && e.target.closest('[data-atool]');
+  if (t) { e.preventDefault(); _annotSetTool(t.getAttribute('data-atool')); }
+});
+// Pan when Space is held or the middle mouse button is used; otherwise draw.
+function _annotPanStart(e) {
+  _annot.panning = true;
+  _annot.panFrom = { x: e.clientX, y: e.clientY, panX: _annot.panX, panY: _annot.panY };
+  const st = document.getElementById('annotStage'); if (st) st.classList.add('panning');
+  _annotUpdateBrushRing();
+  try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (_) {}
+}
+function _annotPanMove(e) {
+  if (!_annot || !_annot.panning || !_annot.panFrom) return;
+  _annot.panX = _annot.panFrom.panX + (e.clientX - _annot.panFrom.x);
+  _annot.panY = _annot.panFrom.panY + (e.clientY - _annot.panFrom.y);
+  _annotClampPan();
+  _annotUpdateTransform();
+}
+function _annotPanEnd() {
+  if (_annot && _annot.panning) { _annot.panning = false; _annot.panFrom = null; const st = document.getElementById('annotStage'); if (st) st.classList.remove('panning'); _annotUpdateBrushRing(); }
+}
+document.addEventListener('pointerdown', function (e) {
+  const c = document.getElementById('annotCanvas');
+  if (!_annot || !c || e.target !== c) return;
+  _annotTrackPointer(e);   // a tap with no movement before it still gets its ring
+  if (_annot.space || e.button === 1) { e.preventDefault(); _annotPanStart(e); return; }
+  if (e.button === 0) _annotDown(e);
+});
+document.addEventListener('pointermove', function (e) {
+  if (!_annot) return;
+  _annotTrackPointer(e);   // the ring follows the pointer whatever else is going on
+  if (_annot.panning) { _annotPanMove(e); return; }
+  if (_annot.drawing) { _annotMove(e); return; }
+  // Hovering the transform box: the pointer says what each handle will do, so
+  // a resize box behaves like one everywhere else does.
+  if (_annot.tool === 'scale' && _annot.xform) {
+    const c = document.getElementById('annotCanvas');
+    if (c && e.target === c) {
+      const p = _annotPt(e);
+      const h = _annotXformHandleAt(p);
+      c.style.cursor = h ? h.cur : (_annotXformInside(p) ? 'move' : 'default');
+    }
+  }
+});
+document.addEventListener('pointerup', function () { _annotPanEnd(); _annotUp(); _annotUpdateBrushRing(); });
+
+/* ==========================================================================
+   20. KEYBOARD SHORTCUTS
    ========================================================================== */
 
 function isTypingIntoField(eventTarget) {
@@ -6201,6 +9110,14 @@ function closeTopmostModal() {
 }
 
 function handleGlobalKeyDown(keyEvent) {
+  /* The touch-up editor owns the keyboard while it is open. It binds its own
+     window handler (_annotKeyDown) with a full set of single-letter tool keys,
+     its own undo, and an Escape that steps back through transform → selection →
+     close — so the app's shortcuts must stay out of its way entirely. Escape in
+     particular: closeTopmostModal() below would shut the editor outright and
+     throw away everything drawn in it. */
+  if (_annot) { return; }
+
   const previewIsOpen = getElement('previewModal').classList.contains('is-open');
 
   if (keyEvent.key === 'Escape') {
@@ -6293,7 +9210,7 @@ function handleGlobalKeyDown(keyEvent) {
 }
 
 /* ==========================================================================
-   20. EVENT WIRING AND BOOT
+   21. EVENT WIRING AND BOOT
    ========================================================================== */
 
 function openFindReplaceDialog() {
@@ -6377,6 +9294,7 @@ function wireGridInteractions() {
       if (actionName === 'delete') { deleteSinglePage(uniqueId); }
       if (actionName === 'preview') { openPreviewAtIndex(findPageIndexById(uniqueId)); }
       if (actionName === 'edit-text') { openTextEditorForPage(uniqueId); }
+      if (actionName === 'touch-up') { openTouchUpForPage(uniqueId); }
       return;
     }
 
@@ -6395,6 +9313,9 @@ function wireGridInteractions() {
 function wirePagesToolbar() {
   getElement('undoButton').addEventListener('click', performUndo);
   getElement('redoButton').addEventListener('click', performRedo);
+  getElement('touchUpButton').addEventListener('click', function () {
+    if (selectedPageIds.length === 1) { openTouchUpForPage(selectedPageIds[0]); }
+  });
   getElement('rotateLeftButton').addEventListener('click', function () { rotateSelectedPages(-90); });
   getElement('rotateRightButton').addEventListener('click', function () { rotateSelectedPages(90); });
   getElement('cutButton').addEventListener('click', cutSelectedPages);
