@@ -7,10 +7,13 @@
 
 <!--
   ============================================================================
-  POLYMATH PDF STUDIO  v2.1.0
+  POLYMATH PDF STUDIO  v2.2.0
   ----------------------------------------------------------------------------
-  A completely client-side PDF editor. Nothing is ever uploaded to a server —
-  every byte of every file stays inside this browser tab.
+  A client-side PDF editor. Every byte of every PDF stays inside this browser
+  tab; nothing is uploaded to a server, and there is no server of ours to
+  upload it to. The ONE exception is the Touch-up editor's "Regenerate" button,
+  which sends a picture of the page being edited (never the PDF file) to
+  Google's Gemini image model, and only when it is pressed — see TOUCH UP.
 
   Libraries (CDN, both MIT licensed):
     * pdf.js   — renders thumbnails, the large preview, and the text layer
@@ -39,6 +42,15 @@
       lines, pasted pictures, and text labels in any of two dozen faces. It is
       the answer to everything a text object model cannot express — a scan, a
       stray mark, a crooked page, a signature, a diagram to cover.
+
+      Two things it does that the page organiser cannot: the CLONE STAMP shows
+      a live preview of the patch it is about to lay down, inside the brush
+      ring under the pointer, so a repair is aimed rather than guessed at; and
+      REGENERATE takes a typed instruction ("rub out the pencil marks") and
+      redraws either the selected area or the whole page image with it. That
+      second one is the only feature here that contacts the network: it needs a
+      Gemini API key, which is asked for the first time the button is pressed
+      and kept in this browser's localStorage alone.
 
       Ported tool for tool from the Science app's "Touch up & label" editor
       (polymathlc/cer), so a fix made in either app can be carried across. What
@@ -2555,6 +2567,19 @@ kbd {
         <button type="button" class="annot-tool" onclick="annotSelClear()" title="Deselect (Esc)">Deselect</button>
       </div>
 
+      <!-- Regenerate: type what you want and the AI redraws it. With an area
+           selected only that area may change; with nothing selected the whole
+           page image is redrawn. Either way it is ONE history step, so Undo
+           puts the page straight back. This is the only feature in PDF Studio
+           that sends anything off the device, and only when it is pressed. -->
+      <div id="annotAiBar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin:0 auto 12px;padding:10px 16px;border:1.5px solid #7c3aed;background:#f6f2ff;border-radius:10px;max-width:900px;">
+        <span style="font-size:0.8rem;font-weight:700;color:#5b21b6;white-space:nowrap;">Regenerate:</span>
+        <input type="text" id="annotAiPrompt" placeholder="Say what you want changed &mdash; &ldquo;rub out the pencil marks&rdquo;, &ldquo;make this box white&rdquo;, &ldquo;redraw this diagram cleanly&rdquo;" style="flex:1 1 340px;min-width:200px;padding:7px 11px;border:1px solid var(--border,#d6d9de);border-radius:8px;font-size:0.85rem;background:#fff;color:inherit;" onkeydown="if(event.key==='Enter'){event.preventDefault();annotAiRegen();}">
+        <button type="button" class="annot-tool" id="annotAiGoBtn" onclick="annotAiRegen()" title="Redraw with the AI. Select an area first and only that area can change; with nothing selected the whole page image is redrawn. Undo puts it back either way. This sends a picture of this page to Google's Gemini model — the only thing in PDF Studio that leaves your device.">Regenerate</button>
+        <span style="font-size:0.75rem;color:#5b21b6;white-space:nowrap;">changes <b id="annotAiScope">the whole picture</b></span>
+        <button type="button" class="annot-tool" onclick="annotAiForgetKey()" title="Remove the Gemini API key from this browser. Regenerate will ask for it again next time.">Forget AI key</button>
+      </div>
+
       <!-- Shown only while a resize / rotate / skew session is open. -->
       <div id="annotXformBar" style="display:none; flex-wrap:wrap; gap:10px 14px; align-items:center; justify-content:center; margin:0 auto 12px; padding:12px 18px; border:1.5px solid #B45309; background:#FDF4E3; border-radius:var(--radius-md); max-width:920px;">
         <span style="font-size:0.8rem; font-weight:700; color:#92400E;">Transforming <span id="annotXformScope">the whole page</span>:</span>
@@ -2605,7 +2630,8 @@ kbd {
         <strong>Erase / Paint:</strong> drag across the page — <strong>click then Shift-click</strong> joins the two points with a straight
         stroke, and <strong>Shift-drag</strong> locks it to horizontal or vertical. <strong>Fill</strong>: click inside a shape to flood it.
         <strong>Clone</strong>: click to set a source, then drag to stamp that area elsewhere — the cleanest way to cover a mark with the paper
-        beside it. <strong>History</strong>: brush the page as you opened it back in. <strong>Select / Lasso / Wand</strong>: mark out an area, then
+        beside it. Once the source is set, <strong>the ring under your pointer shows the exact patch that will be stamped</strong>, so you can line
+        it up before you press. <strong>History</strong>: brush the page as you opened it back in. <strong>Select / Lasso / Wand</strong>: mark out an area, then
         fill it, move it, delete it or smart-fill it (Esc deselects). <strong>Move</strong>: drag inside a selection to cut it out and drop it
         anywhere, Alt to copy. <strong>Resize / Rotate / Skew</strong>: with something selected they act on that object; with nothing selected they
         act on the whole page, which is how a crooked scan gets straightened — <strong>Straighten…</strong> traces an edge and levels it for you.
@@ -2617,7 +2643,13 @@ kbd {
         page with the resize handles already on it.
         <br><strong>Scroll</strong> over the page to zoom (down to single pixels); <strong>hold Space</strong> or the middle mouse button and drag to
         pan; <strong>scroll over a slider</strong> to change it. Erase, Paint, Clone, History and Line draw a ring at the exact size of the mark they
-        will make, at whatever zoom you are on.
+        will make, at whatever zoom you are on — and with <strong>Clone</strong> that ring is <strong>filled with the pixels it is about to
+        stamp</strong>, moving with the pointer.
+        <br><strong>Regenerate:</strong> type what you want in the purple bar and the AI redraws it. Select an area first and <strong>only that area
+        can change</strong>; with nothing selected the whole page image is redrawn. It is one step either way, so <strong>Undo</strong> puts the page
+        straight back. This is the <strong>only</strong> feature in PDF Studio that sends anything off this device: pressing it sends a picture of
+        this page (never the PDF file) to Google's Gemini model, using an API key you paste in once and that is kept in this browser alone.
+        <strong>Forget AI key</strong> removes it again.
         <br><strong>Keys:</strong> <kbd>E</kbd> erase · <kbd>B</kbd> paint · <kbd>G</kbd> fill · <kbd>S</kbd> clone · <kbd>Y</kbd> history ·
         <kbd>M</kbd> select · <kbd>L</kbd> lasso · <kbd>W</kbd> wand · <kbd>V</kbd> move · <kbd>R</kbd> rotate · <kbd>K</kbd> skew ·
         <kbd>F</kbd> resize · <kbd>U</kbd> line · <kbd>T</kbd> text · <kbd>[</kbd> <kbd>]</kbd> brush size · <kbd>Del</kbd> delete the selection ·
@@ -2648,11 +2680,11 @@ kbd {
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
 </div>
 
-<div class="version-badge">Polymath PDF Studio v2.1.0</div>
+<div class="version-badge">Polymath PDF Studio v2.2.0</div>
 
 <script>
 /* ==========================================================================
-   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.1.0
+   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.2.0
    ==========================================================================
    Deliberately verbose and unminified so it stays easy to read and extend.
 
@@ -6634,6 +6666,14 @@ function stepEditorPage(offset) {
   #annotBrushRing.tiny::before, #annotBrushRing.tiny::after { content:''; position:absolute; background:rgba(0,0,0,0.85); box-shadow:0 0 0 1px rgba(255,255,255,0.9); }
   #annotBrushRing.tiny::before { left:50%; top:50%; width:1px; height:11px; margin:-5.5px 0 0 -0.5px; }
   #annotBrushRing.tiny::after { left:50%; top:50%; height:1px; width:11px; margin:-0.5px 0 0 -5.5px; }
+  /* Clone stamp: the ring is FILLED with the pixels that would be stamped, so
+     the mark is aimed by looking at it rather than by counting across from the
+     source pin. The ring goes white-on-black while it is showing a picture —
+     a black hairline over arbitrary artwork is the one thing that disappears. */
+  #annotBrushRing.peeking { border-color:rgba(255,255,255,0.95); box-shadow:0 0 0 1px rgba(0,0,0,0.85), 0 2px 10px rgba(0,0,0,0.35); }
+  #annotClonePeek { position:absolute; inset:0; width:100%; height:100%; border-radius:50%; display:none; pointer-events:none; }
+  #annotBrushRing.peeking #annotClonePeek { display:block; }
+  #annotClonePeek.pixelated { image-rendering:pixelated; image-rendering:crisp-edges; }
   #annotBrushHud { position:absolute; z-index:8; pointer-events:none; opacity:0; transition:opacity 0.16s ease; transform:translateX(-50%);
     background:rgba(26,26,26,0.88); color:#fff; font-size:11px; font-weight:700; line-height:1;
     padding:5px 8px; border-radius:6px; white-space:nowrap; font-variant-numeric:tabular-nums; }
@@ -6757,6 +6797,7 @@ function _annotOpenSrc(srcP, target, title) {
       // stays up after a change — see the brush cursor below.
       ptr: null, ptrIn: false, hudUntil: 0, hudTimer: null };
     _annotSelSyncBar();
+    _annotAiBarInit();
     if (!_annotAntsRunning) _annotAntsLoop();
     _annotSyncControls();
     _annotSyncTextBar();
@@ -6912,7 +6953,13 @@ function _annotRingEls(make) {
   const st = document.getElementById('annotStage');
   if (!st) return null;
   let ring = document.getElementById('annotBrushRing'), hud = document.getElementById('annotBrushHud');
-  if (!ring && make) { ring = document.createElement('div'); ring.id = 'annotBrushRing'; st.appendChild(ring); }
+  if (!ring && make) {
+    ring = document.createElement('div'); ring.id = 'annotBrushRing';
+    // The clone preview lives INSIDE the ring, so it is positioned, sized and
+    // hidden by exactly the code that already does all three for the ring.
+    const pk = document.createElement('canvas'); pk.id = 'annotClonePeek'; ring.appendChild(pk);
+    st.appendChild(ring);
+  }
   if (!hud && make) { hud = document.createElement('div'); hud.id = 'annotBrushHud'; st.appendChild(hud); }
   return ring ? { st, ring, hud } : null;
 }
@@ -6947,6 +6994,7 @@ function _annotUpdateBrushRing() {
   }
   if (!want) {
     ring.style.display = 'none';
+    ring.classList.remove('peeking');
     if (hud) hud.classList.remove('show');
     return;
   }
@@ -6961,6 +7009,7 @@ function _annotUpdateBrushRing() {
   ring.style.width = ring.style.height = Math.max(1, d) + 'px';
   ring.style.left = (p.x - d / 2) + 'px';
   ring.style.top = (p.y - d / 2) + 'px';
+  _annotUpdateClonePeek(ring, d);
   if (hud) {
     const on = _annot.hudUntil > Date.now();
     hud.classList.toggle('show', on);
@@ -6970,6 +7019,47 @@ function _annotUpdateBrushRing() {
       hud.style.top = Math.min(box.height - 26, p.y + d / 2 + 12) + 'px';
     }
   }
+}
+// ---- The clone stamp's live preview ----------------------------------------
+// The source pin says where the copy comes FROM and the ring says how big the
+// mark will be. Neither says what the mark will BE, so lining a stamp up meant
+// clicking and then looking at what landed — and undoing it when it was half a
+// letter out. The ring is therefore filled with the patch that would be stamped
+// this instant: a lens on the source, carried under the pointer, at the same
+// zoom as everything else. That is what turns "cover this word with the paper
+// beside it" into something you aim rather than guess at.
+const ANNOT_PEEK_MIN = 14;    // under this many screen px there is nothing to see inside the ring
+
+// Where the pixels under the brush would be copied FROM, right now. Mid-stroke
+// the offset was locked in at pointer-down; before the first dab, starting the
+// drag here is what would put the source point itself under the pointer — so
+// the preview is centred on the source, which is exactly what would land.
+function _annotClonePeekSrc() {
+  if (!_annot || _annot.tool !== 'clone' || !_annot.cloneSrc || !_annot.ptr) return null;
+  if (!_annot.cloneOff) return { x: _annot.cloneSrc.x, y: _annot.cloneSrc.y };
+  const s = _annotDisplayScale();
+  const ix = (_annot.ptr.x - _annot.panX) / s, iy = (_annot.ptr.y - _annot.panY) / s;
+  return { x: ix - _annot.cloneOff.x, y: iy - _annot.cloneOff.y };
+}
+function _annotUpdateClonePeek(ring, d) {
+  const peek = ring && ring.firstElementChild;
+  if (!peek || peek.tagName !== 'CANVAS') return;
+  const src = d >= ANNOT_PEEK_MIN ? _annotClonePeekSrc() : null;
+  ring.classList.toggle('peeking', !!src);
+  if (!src) return;
+  // Mid-stroke the stamp reads the FROZEN snapshot, so the preview must read it
+  // too — dragging back over ground already covered would otherwise preview the
+  // copy instead of the source, and the two diverge exactly where it matters.
+  const from = _annot.cloneSnap || _annot.canvas;
+  const px = Math.max(1, Math.round(_annot.size));
+  // The backing store is the brush in IMAGE pixels, so what is drawn here is
+  // pixel-for-pixel what the dab will put down, however far the view is zoomed.
+  if (peek.width !== px || peek.height !== px) { peek.width = px; peek.height = px; }
+  const g = peek.getContext('2d');
+  g.clearRect(0, 0, px, px);
+  g.imageSmoothingEnabled = false;
+  try { g.drawImage(from, Math.round(src.x - px / 2), Math.round(src.y - px / 2), px, px, 0, 0, px, px); } catch (_) {}
+  peek.classList.toggle('pixelated', d / px >= 3);
 }
 // Show the ring and its "12 px" badge for a moment after the size changes, so
 // the slider, the wheel and [ ] all say what they did even when the pointer is
@@ -7939,6 +8029,16 @@ function _annotSelPath(pts) {
 function _annotSelSyncBar() {
   const bar = document.getElementById('annotSelBar');
   if (bar) bar.style.display = (_annot && _annot.sel) ? 'flex' : 'none';
+  _annotAiSyncScope();   // ✨ Regenerate says which of its two scopes it is about to use
+}
+// The bounding box of a selection, whichever shape it is — a polygon from the
+// rectangle / lasso tools, or a masked rect from the magic wand.
+function _annotSelBox(sel) {
+  if (!sel) return null;
+  if (!sel.pts) return { x: sel.x, y: sel.y, w: sel.w, h: sel.h };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  sel.pts.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
 }
 function annotSelClear() {
   if (!_annot) return;
@@ -8255,6 +8355,153 @@ function annotSelSmartFill() {
   ctx.putImageData(img, bx, by);
   showToast('Smart fill applied — Undo puts it back.', 'success');
 }
+// ---- ✨ THE IMAGE MODEL — the one thing in this app that leaves the device ---
+// PDF Studio is client-side by design: every byte of every PDF stays in this
+// tab. ✨ Regenerate is the single exception, and it is built so that promise
+// stays readable rather than quietly untrue. Nothing is sent unless the button
+// is pressed; what is sent is ONE picture of the page being touched up, never
+// the PDF file; and the key is the user's own, typed once and kept in this
+// browser's localStorage — not in this file, not in the repository, and not on
+// a server of ours, because there isn't one.
+const PDF_AI_KEY_LS = 'pdfStudioGeminiKey';
+const PDF_AI_MODELS = ['gemini-3.1-flash-image-preview', 'gemini-2.5-flash-image'];
+// There is no project-wide model here to interrogate, so the bar is always
+// offered and the key is asked for at the moment the button is first pressed.
+function imageAiReady() { return true; }
+function annotAiKey() { try { return localStorage.getItem(PDF_AI_KEY_LS) || ''; } catch (_) { return ''; } }
+function annotAiSetKey(k) { try { if (k) localStorage.setItem(PDF_AI_KEY_LS, k); else localStorage.removeItem(PDF_AI_KEY_LS); } catch (_) {} }
+function annotAiForgetKey() {
+  annotAiSetKey('');
+  showToast('AI key removed from this browser', 'success');
+}
+function _annotAiAskKey() {
+  const msg = '\u2728 Regenerate uses Google\'s Gemini image model, which runs on Google\'s servers.\n\n'
+    + 'Pressing it sends a picture of THIS PAGE (never the PDF file itself) to Google. Everything else in PDF Studio stays on this device.\n\n'
+    + 'Paste a Gemini API key from aistudio.google.com to switch it on. It is kept in this browser only, and "Forget AI key" removes it again.';
+  const k = ((window.prompt(msg, annotAiKey()) || '')).trim();
+  if (k) annotAiSetKey(k);
+  return k;
+}
+// The same signature the sibling apps' Firebase-backed version has, so the
+// ✨ Regenerate code above is byte-for-byte the one they run.
+async function generateEnhancedImageDataUrl(prompt, media) {
+  const key = annotAiKey() || _annotAiAskKey();
+  if (!key) throw new Error('no AI key is set on this browser');
+  const m = Array.isArray(media) ? media[0] : media;
+  if (!m || !m.data) throw new Error('there is no picture to send');
+  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType: m.mimeType, data: m.data } }] }] });
+  let lastError = null;
+  for (const model of PDF_AI_MODELS) {
+    try {
+      const resp = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+      const json = await resp.json().catch(function () { return null; });
+      if (!resp.ok) throw new Error((json && json.error && json.error.message) || ('the AI refused the request (' + resp.status + ')'));
+      const cand = (json && json.candidates && json.candidates[0]) || null;
+      const parts = (cand && cand.content && cand.content.parts) || [];
+      const img = parts.filter(function (p) { return p && p.inlineData && p.inlineData.data; })[0];
+      if (img) return 'data:' + (img.inlineData.mimeType || 'image/png') + ';base64,' + img.inlineData.data;
+      const text = parts.map(function (p) { return p && p.text; }).filter(Boolean).join(' ');
+      throw new Error(text || 'the AI did not return a picture');
+    } catch (e) { lastError = e; console.warn('image model failed', model, e); }
+  }
+  throw lastError || new Error('the AI could not be reached');
+}
+// ---- ✨ REGENERATE: say what you want and the AI redraws it ------------------
+// AI content-aware fill answers exactly ONE question — "take this out" — with a
+// prompt nobody can change. Everything else an author actually wants of a
+// picture ("rub out the pencil marks", "make the arrow red", "redraw this
+// beaker cleanly", "put the missing axis label back") had no door at all. This
+// is that door: a line to type in, and the same image model behind it.
+//
+// TWO SCOPES, and the difference between them is the whole safety story:
+//   * With an area SELECTED, only that area may change. The model is shown the
+//     picture with the area RINGED rather than blanked — "make the arrow red"
+//     needs the arrow still visible, which is exactly what content-aware fill's
+//     magenta blanking destroys — and the reply is composited back through
+//     _annotWithSelClip, so a model that quietly rewrote the whole page cannot
+//     touch one pixel outside the selection.
+//   * With NOTHING selected the whole picture is redrawn, which is the honest
+//     reading of "no area chosen".
+// The bar names the scope it is about to use, because those two are very
+// different things to press a button on.
+//
+// It is one history step either way, so ↶ Undo puts the original back — which
+// is what makes an experimental prompt cheap enough to actually experiment with.
+const ANNOT_AI_KEEP = ' Return the ENTIRE image at the SAME size and aspect ratio. The picture is usually a scan, photocopy or photo of a printed page, so match the grain, tone, brightness and line weight of the surrounding picture exactly — do not clean it up, sharpen it, whiten it, straighten it or restyle it. Do not add labels, watermarks, borders, captions or any object that was not asked for.';
+function _annotAiSyncScope() {
+  const el = document.getElementById('annotAiScope');
+  if (el) el.textContent = (_annot && _annot.sel) ? 'the selected area only' : 'the whole picture';
+}
+// Opening the editor on a new picture starts the bar empty — last picture's
+// instruction sitting in the box is one Enter away from being run on this one —
+// and hides it outright where there is no image model to run it.
+function _annotAiBarInit() {
+  const bar = document.getElementById('annotAiBar');
+  if (bar) bar.style.display = imageAiReady() ? 'flex' : 'none';
+  const input = document.getElementById('annotAiPrompt');
+  if (input) input.value = '';
+  const btn = document.getElementById('annotAiGoBtn');
+  if (btn) { btn.disabled = false; btn.textContent = '\u2728 Regenerate'; }
+  _annotAiSyncScope();
+}
+async function annotAiRegen() {
+  if (!_annot) return;
+  const input = document.getElementById('annotAiPrompt');
+  const want = ((input && input.value) || '').trim();
+  if (!want) { showToast('Type what you want changed first', 'info'); if (input) input.focus(); return; }
+  if (_annot.aiFillBusy) { showToast('The AI is already working on this picture…', 'info'); return; }
+  if (!imageAiReady()) { showToast('Image AI is not available in this project', 'error'); return; }
+  const canvas = _annot.canvas, sel = _annot.sel;
+  const btn = document.getElementById('annotAiGoBtn');
+  _annot.aiFillBusy = true;
+  if (btn) { btn.disabled = true; btn.textContent = '\u2728 Regenerating…'; }
+  showToast('\u2728 Regenerating ' + (sel ? 'the selected area' : 'the picture') + '…', 'info');
+  try {
+    const marked = document.createElement('canvas');
+    marked.width = canvas.width; marked.height = canvas.height;
+    const mx = marked.getContext('2d');
+    mx.drawImage(canvas, 0, 0);
+    let prompt;
+    if (sel) {
+      // The marker is drawn just OUTSIDE the selection, so it never covers the
+      // content the instruction is about — and anything of it that survives
+      // into the reply is outside the clip and therefore cannot be composited.
+      const b = _annotSelBox(sel);
+      const pad = Math.max(3, Math.round(Math.min(canvas.width, canvas.height) * 0.006));
+      mx.save();
+      mx.strokeStyle = '#ff00ff';
+      mx.lineWidth = pad;
+      mx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
+      mx.restore();
+      prompt = 'Reproduce this ENTIRE image exactly as it is — same size, same colours, same content — and change ONLY what is inside the magenta (#FF00FF) rectangle: ' + want + '. '
+        + 'The magenta rectangle is a marker, not part of the picture: do not draw it in your output, and blend your change seamlessly into the picture at its edges. Change NOTHING outside it.' + ANNOT_AI_KEEP;
+    } else {
+      prompt = 'Redraw this image with the following change: ' + want + '. Keep everything else in the picture exactly as it is.' + ANNOT_AI_KEEP;
+    }
+    const dataUrl = marked.toDataURL('image/png');
+    const outUrl = await generateEnhancedImageDataUrl(prompt, { mimeType: 'image/png', data: dataUrl.split(',')[1] || '' });
+    const img = await _loadImageEl(outUrl);
+    if (!_annot || _annot.canvas !== canvas) return;   // the editor was closed while the AI was thinking
+    _annotPushHistory();
+    if (sel) {
+      _annotWithSelClip(c => c.drawImage(img, 0, 0, canvas.width, canvas.height));
+    } else {
+      // clearRect first, never a 'copy' composite: a canvas stranded in a
+      // composite mode erases everything drawn afterwards.
+      const ctx = _annot.ctx;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    }
+    showToast('Regenerated \u2713 — \u21b6 Undo puts it back', 'success');
+  } catch (e) {
+    console.warn('AI regenerate failed', e);
+    showToast('Regenerate failed: ' + (e && e.message ? e.message : e), 'error');
+  } finally {
+    if (_annot) _annot.aiFillBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = '\u2728 Regenerate'; }
+  }
+}
 function _annotDown(e) {
   if (!_annot) return;
   e.preventDefault();
@@ -8319,7 +8566,8 @@ function _annotDown(e) {
     if (e.altKey || !_annot.cloneSrc) {
       _annot.cloneSrc = { x: p.x, y: p.y };
       _annotUpdateCloneMarker();
-      showToast('Clone source set — now drag to stamp that area elsewhere', 'info');
+      _annotUpdateBrushRing();   // the ring can start previewing the moment there is a source
+      showToast('Clone source set — the ring under your pointer now shows what will be stamped', 'info');
       return;
     }
     _annotPushHistory();
@@ -8331,6 +8579,7 @@ function _annotDown(e) {
     _annot.drawing = true;
     _annot.last = p;
     _annotCloneDab(ctx, p.x, p.y);
+    _annotUpdateBrushRing();   // the offset is locked in now — preview from the frozen snapshot
     return;
   }
   _annotPushHistory();
@@ -8503,6 +8752,7 @@ function _annotUp() {
   if ((_annot.tool === 'erase' || _annot.tool === 'paint') && _annot.last) _annot.anchor = _annot.last;
   _annotResetCompose();
   _annot.drawing = false; _annot.start = null; _annot.snap = null; _annot.shiftSeg = null; _annot.last = null; _annot.cloneSnap = null; _annot.cloneOff = null;
+  _annotUpdateBrushRing();   // the offset is released — the preview goes back to showing the source itself
 }
 /* ==========================================================================
    THE TEXT TOOL
