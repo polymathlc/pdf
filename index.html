@@ -2577,7 +2577,7 @@ kbd {
         <input type="text" id="annotAiPrompt" placeholder="Say what you want changed &mdash; &ldquo;rub out the pencil marks&rdquo;, &ldquo;make this box white&rdquo;, &ldquo;redraw this diagram cleanly&rdquo;" style="flex:1 1 340px;min-width:200px;padding:7px 11px;border:1px solid var(--border,#d6d9de);border-radius:8px;font-size:0.85rem;background:#fff;color:inherit;" onkeydown="if(event.key==='Enter'){event.preventDefault();annotAiRegen();}">
         <button type="button" class="annot-tool" id="annotAiGoBtn" onclick="annotAiRegen()" title="Redraw with the AI. Select an area first and only that area can change; with nothing selected the whole page image is redrawn. Undo puts it back either way. This sends a picture of this page to Google's Gemini model — the only thing in PDF Studio that leaves your device.">Regenerate</button>
         <span style="font-size:0.75rem;color:#5b21b6;white-space:nowrap;">changes <b id="annotAiScope">the whole picture</b></span>
-        <button type="button" class="annot-tool" onclick="annotAiForgetKey()" title="Remove the Gemini API key from this browser. Regenerate will ask for it again next time.">Forget AI key</button>
+        <button type="button" class="annot-tool" onclick="annotAiForgetKey()" title="Remove the OpenAI and Gemini API keys from this browser. Regenerate will ask for one again next time.">Forget AI key</button>
       </div>
 
       <!-- Shown only while a resize / rotate / skew session is open. -->
@@ -2648,7 +2648,7 @@ kbd {
         <br><strong>Regenerate:</strong> type what you want in the purple bar and the AI redraws it. Select an area first and <strong>only that area
         can change</strong>; with nothing selected the whole page image is redrawn. It is one step either way, so <strong>Undo</strong> puts the page
         straight back. This is the <strong>only</strong> feature in PDF Studio that sends anything off this device: pressing it sends a picture of
-        this page (never the PDF file) to Google's Gemini model, using an API key you paste in once and that is kept in this browser alone.
+        this page (never the PDF file) to OpenAI's ChatGPT Images 2.6 (with an OpenAI key) or Google's Gemini model (with a Gemini key), using an API key you paste in once and that is kept in this browser alone.
         <strong>Forget AI key</strong> removes it again.
         <br><strong>Keys:</strong> <kbd>E</kbd> erase · <kbd>B</kbd> paint · <kbd>G</kbd> fill · <kbd>S</kbd> clone · <kbd>Y</kbd> history ·
         <kbd>M</kbd> select · <kbd>L</kbd> lasso · <kbd>W</kbd> wand · <kbd>V</kbd> move · <kbd>R</kbd> rotate · <kbd>K</kbd> skew ·
@@ -8365,6 +8365,55 @@ function annotSelSmartFill() {
 // a server of ours, because there isn't one.
 const PDF_AI_KEY_LS = 'pdfStudioGeminiKey';
 const PDF_AI_MODELS = ['gemini-3.1-flash-image-preview', 'gemini-2.5-flash-image'];
+// CHATGPT IMAGES 2.6 FIRST (November 2026). Every Polymath app draws with
+// OpenAI's Images 2.6 now. Here, with no server of ours, it is reached with an
+// OpenAI key (sk-…) the user pastes — the same key the Photo Editor uses, on
+// the same origin — and `gpt-image-2.6-sunburst`, the 2.6 model for precise
+// edits. A Gemini key (AIza…) still works and is used when no OpenAI key is
+// saved, or when ChatGPT refuses. The prompt takes either and sorts it by its
+// prefix, so nobody has to know which box is which.
+const PDF_OPENAI_KEY_LS = 'polymathOpenAiImageKey';
+const PDF_OPENAI_IMAGE_MODEL = 'gpt-image-2.6-sunburst';
+function annotOpenAiKey() { try { return (localStorage.getItem(PDF_OPENAI_KEY_LS) || '').trim(); } catch (_) { return ''; } }
+function annotOpenAiSetKey(k) { try { if (k) localStorage.setItem(PDF_OPENAI_KEY_LS, k); else localStorage.removeItem(PDF_OPENAI_KEY_LS); } catch (_) {} }
+function _pdfB64ToBlob(b64, mime) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime || 'image/png' });
+}
+// One EDIT of the page picture on /images/edits. No size (the default keeps
+// the page's shape) and no input_fidelity (the 2.x models refuse it); a 400
+// about an extra gets ONE bare retry.
+async function _pdfOpenAiEdit(prompt, m) {
+  const key = annotOpenAiKey();
+  const form = function (extras) {
+    const fd = new FormData();
+    fd.append('model', PDF_OPENAI_IMAGE_MODEL);
+    fd.append('prompt', prompt);
+    fd.append('n', '1');
+    fd.append('image', _pdfB64ToBlob(m.data, m.mimeType), 'page.png');
+    if (extras) { fd.append('quality', 'high'); fd.append('output_format', 'png'); }
+    return fd;
+  };
+  const send = async function (fd) {
+    const resp = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
+    const json = await resp.json().catch(function () { return null; });
+    if (!resp.ok) {
+      const err = new Error('ChatGPT Images ' + resp.status + ': ' + ((json && json.error && json.error.message) || 'refused'));
+      err.status = resp.status;
+      throw err;
+    }
+    const item = json && json.data && json.data[0];
+    if (item && item.b64_json) return 'data:image/png;base64,' + item.b64_json;
+    throw new Error('ChatGPT Images did not return a picture');
+  };
+  try { return await send(form(true)); }
+  catch (e) {
+    if (!(e.status === 400 && /unknown|unsupported|not support|invalid value|additional propert/i.test(e.message))) throw e;
+    return await send(form(false));
+  }
+}
 // There is no project-wide model here to interrogate, so the bar is always
 // offered and the key is asked for at the moment the button is first pressed.
 function imageAiReady() { return true; }
@@ -8372,23 +8421,32 @@ function annotAiKey() { try { return localStorage.getItem(PDF_AI_KEY_LS) || ''; 
 function annotAiSetKey(k) { try { if (k) localStorage.setItem(PDF_AI_KEY_LS, k); else localStorage.removeItem(PDF_AI_KEY_LS); } catch (_) {} }
 function annotAiForgetKey() {
   annotAiSetKey('');
+  annotOpenAiSetKey('');
   showToast('AI key removed from this browser', 'success');
 }
 function _annotAiAskKey() {
-  const msg = '\u2728 Regenerate uses Google\'s Gemini image model, which runs on Google\'s servers.\n\n'
-    + 'Pressing it sends a picture of THIS PAGE (never the PDF file itself) to Google. Everything else in PDF Studio stays on this device.\n\n'
-    + 'Paste a Gemini API key from aistudio.google.com to switch it on. It is kept in this browser only, and "Forget AI key" removes it again.';
-  const k = ((window.prompt(msg, annotAiKey()) || '')).trim();
-  if (k) annotAiSetKey(k);
+  const msg = '\u2728 Regenerate draws with OpenAI\'s ChatGPT Images 2.6 (or Google\'s Gemini image model), which run on their servers.\n\n'
+    + 'Pressing it sends a picture of THIS PAGE (never the PDF file itself) to OpenAI or Google. Everything else in PDF Studio stays on this device.\n\n'
+    + 'Paste an OpenAI API key (sk-\u2026) to use ChatGPT Images 2.6, or a Gemini key (AIza\u2026) from aistudio.google.com. It is kept in this browser only, and "Forget AI key" removes it again.';
+  const k = ((window.prompt(msg, annotOpenAiKey() || annotAiKey()) || '')).trim();
+  if (/^sk-/.test(k)) annotOpenAiSetKey(k);
+  else if (k) annotAiSetKey(k);
   return k;
 }
 // The same signature the sibling apps' Firebase-backed version has, so the
 // ✨ Regenerate code above is byte-for-byte the one they run.
 async function generateEnhancedImageDataUrl(prompt, media) {
-  const key = annotAiKey() || _annotAiAskKey();
-  if (!key) throw new Error('no AI key is set on this browser');
+  if (!annotOpenAiKey() && !annotAiKey()) _annotAiAskKey();
+  if (!annotOpenAiKey() && !annotAiKey()) throw new Error('no AI key is set on this browser');
   const m = Array.isArray(media) ? media[0] : media;
   if (!m || !m.data) throw new Error('there is no picture to send');
+  let openAiError = null;
+  if (annotOpenAiKey()) {
+    try { return await _pdfOpenAiEdit(prompt, m); }
+    catch (e) { openAiError = e; console.warn('ChatGPT Images 2.6 failed', e); }
+  }
+  const key = annotAiKey();
+  if (!key) throw openAiError || new Error('no Gemini key is set on this browser');
   const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType: m.mimeType, data: m.data } }] }] });
   let lastError = null;
   for (const model of PDF_AI_MODELS) {
