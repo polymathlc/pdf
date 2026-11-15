@@ -7,7 +7,7 @@
 
 <!--
   ============================================================================
-  POLYMATH PDF STUDIO  v2.3.0
+  POLYMATH PDF STUDIO  v2.4.0
   ----------------------------------------------------------------------------
   A client-side PDF editor. Every byte of every PDF stays inside this browser
   tab; nothing is uploaded to a server, and there is no server of ours to
@@ -69,6 +69,25 @@
       (polymathlc/cer), so a fix made in either app can be carried across. What
       it stores is one PNG per page, held in the page's own unrotated
       orientation and laid over that page at export, underneath any text edits.
+
+      Double-clicking a page in the grid opens it here.
+
+  RECORD AND REPEAT — one page's touch-up, replayed on others
+      For the thing that is wrong on EVERY page: a school's name in the header,
+      a page number to cover, a stamp in the same corner of each scan. Press
+      Record in the Touch-up editor, make the marks once — rub the words out,
+      put a new label where they were — and press Stop. Every page of the
+      document is then shown as a thumbnail to tick, and each ticked page gets
+      the same marks at exactly the same place.
+
+      A recording is the list of things that were done (strokes, fills, clone
+      stamps, selections, moves, resizes, labels, pasted pictures), in canvas
+      pixels, and it is replayed through the editor's own tool code against
+      each page's own picture — so a clone stamp on page 9 copies page 9's
+      paper, and a replayed page is pixel for pixel what doing it by hand would
+      have made. The whole batch is one step of the Pages undo, a page the
+      recording makes no difference to is left untouched, and Repeat on the
+      Pages toolbar puts the last recording on more pages later (section 21).
 
   HOW THE TEXT EDITING ACTUALLY WORKS (and its honest limits)
   ----------------------------------------------------------------------------
@@ -1690,6 +1709,248 @@ kbd {
 }
 
 /* ==========================================================================
+   13c. RECORD AND REPEAT
+   The Record button and its status badge inside the Touch-up editor, and the
+   page picker that opens when a recording is stopped. Red is used for ONE
+   thing here — "this is being recorded" — and nowhere else in the editor, so
+   it cannot be mistaken for anything but that.
+   ========================================================================== */
+.annot-tool.annot-record {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.annot-record-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #D93025;
+  flex: 0 0 auto;
+}
+
+.annot-tool.annot-record.is-recording {
+  border-color: #D93025;
+  background: #FDECEA;
+  color: #A1241B;
+}
+
+/* While recording the dot becomes a square — the universal "stop" — and the
+   live dot in the badge on the page is the one that pulses. */
+.annot-tool.annot-record.is-recording .annot-record-dot { border-radius: 2px; }
+
+.annot-record-dot.is-live { animation: recordPulse 1.2s ease-in-out infinite; }
+
+@keyframes recordPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+/* What has been recorded so far, floating over the top-left corner of the
+   stage. It is absolutely positioned and one line high whatever it says, so
+   it can never move the page; and it lets the pointer through, so it can
+   never swallow a mark. (#annotStage sets line-height to 0 for its canvases,
+   so the badge states its own.) */
+.annot-macro-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 9;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 20px);
+  padding: 6px 12px 6px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(161, 36, 27, 0.93);
+  color: #FFFFFF;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.25;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  user-select: none;
+}
+
+.annot-macro-badge .annot-record-dot { background: #FFFFFF; }
+
+.annot-macro-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.macro-modal-card { width: min(1040px, 96vw); }
+
+/* The grid of pages is the part that scrolls; what was recorded, the tick
+   tools and the buttons stay where they are however many pages there are. */
+.macro-modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.macro-summary { flex: 0 0 auto; }
+.macro-summary strong { display: block; margin-bottom: 4px; font-size: var(--font-size-sm); }
+
+.macro-tick-tools {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
+.macro-tick-tools .range-input { width: 132px; }
+
+.macro-tick-hint {
+  margin-left: var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.macro-pages-grid {
+  flex: 1 1 auto;
+  min-height: 170px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  align-content: start;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.macro-tile {
+  position: relative;
+  padding: var(--space-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  user-select: none;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast),
+              background var(--transition-fast), transform var(--transition-fast);
+}
+
+.macro-tile:hover { border-color: var(--border-medium); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+
+.macro-tile:focus-visible {
+  outline: 3px solid var(--accent-light);
+  outline-offset: 1px;
+}
+
+.macro-tile.is-ticked {
+  border-color: var(--accent-dark);
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 2px var(--accent-light), var(--shadow-xs);
+}
+
+/* The page open in the editor: ticked, and not to be unticked. */
+.macro-tile.is-locked { cursor: default; }
+.macro-tile.is-locked:hover { transform: none; box-shadow: 0 0 0 2px var(--accent-light), var(--shadow-xs); }
+
+.macro-tile-check {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--border-medium);
+  background: rgba(255,255,255,0.94);
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.macro-tile.is-ticked .macro-tile-check {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  color: #FFFFFF;
+}
+
+.macro-tile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  margin-top: 6px;
+  min-height: 18px;
+  font-size: var(--font-size-xs);
+}
+
+.macro-tile-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.macro-tile-tag.is-source { background: var(--accent-bg); color: #8A5A12; }
+.macro-tile-tag.is-warning { background: var(--danger-bg); color: #A33A3A; }
+
+.macro-note {
+  flex: 0 0 auto;
+  margin-top: var(--space-md);
+  padding: 9px 12px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  color: #7A4F10;
+  line-height: 1.5;
+}
+
+.macro-action-row {
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: var(--space-md);
+}
+
+.macro-status {
+  flex: 1 1 220px;
+  margin-right: auto;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* On a phone there is not the height to pin everything round a scrolling grid
+   — the grid would be left one row tall. The whole dialog scrolls instead,
+   and the grid takes a fixed share of the screen. */
+@media (max-width: 780px) {
+  .macro-modal-body { overflow: auto; }
+  .macro-summary { padding: var(--space-sm) var(--space-md); }
+  .macro-tick-hint { display: none; }
+  .macro-pages-grid {
+    flex: 0 0 auto;
+    max-height: 46vh;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  }
+  .macro-action-row { justify-content: stretch; }
+  .macro-action-row .secondary-button,
+  .macro-action-row .primary-button { flex: 1 1 auto; }
+}
+
+/* ==========================================================================
    14. TOASTS + PROGRESS + VERSION
    ========================================================================== */
 .toast-stack {
@@ -2043,13 +2304,20 @@ kbd {
         </svg>
         <span>Duplicate</span>
       </button>
-      <button class="tool-button" id="touchUpButton" title="Touch up the selected page — erase, paint, clone, select, straighten and label it (one page at a time)" disabled>
+      <button class="tool-button" id="touchUpButton" title="Touch up the selected page — erase, paint, clone, select, straighten and label it (one page at a time). Double-clicking a page opens it here too." disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M15.5 4.5l4 4"></path>
           <path d="M17 3l4 4-9.5 9.5-5 1 1-5L17 3z"></path>
           <path d="M6 17c-1.6.6-2 2.2-2 4 1.8 0 3.4-.4 4-2"></path>
         </svg>
         <span>Touch up</span>
+      </button>
+      <button class="tool-button" id="repeatRecordingButton" title="Repeat a recorded touch-up on other pages. Record one first: double-click a page, press Record in the Touch-up editor, make your marks, then Stop." disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M10 8.5l6 3.5-6 3.5z"></path>
+        </svg>
+        <span>Repeat</span>
       </button>
     </div>
 
@@ -2894,6 +3162,7 @@ kbd {
       <table class="shortcut-table">
         <tr><td colspan="2" class="shortcut-section-heading">Pages mode</td></tr>
         <tr><td><kbd>Click</kbd></td><td>Select a single page</td></tr>
+        <tr><td><kbd>Double-click</kbd></td><td>Open the page in the Touch-up editor</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>Click</kbd></td><td>Add or remove one page from the selection</td></tr>
         <tr><td><kbd>Shift</kbd> + <kbd>Click</kbd></td><td>Select a continuous run of pages</td></tr>
         <tr><td><kbd>Ctrl</kbd> + <kbd>A</kbd></td><td>Select every page</td></tr>
@@ -3006,6 +3275,16 @@ kbd {
         <button type="button" class="annot-tool" onclick="annotZoomStep(1.3)" title="Zoom in">+</button>
         <button type="button" class="annot-tool" onclick="annotZoomFit()" title="Fit the whole page in view (0)">Fit</button>
         <button type="button" class="annot-tool" onclick="annotUndo()" title="Undo the last mark (Ctrl+Z). This is the editor's own undo — it steps back through the marks made in here, not through the page operations behind it.">Undo</button>
+
+        <span style="width:1px; height:20px; background: var(--border-medium);"></span>
+        <!-- Record and repeat (section 21): capture the marks made on this page,
+             then choose the pages to repeat them on at the same place. -->
+        <button type="button" class="annot-tool annot-record" id="annotRecordButton" onclick="annotMacroToggle()" aria-pressed="false"
+                title="Record — every mark you make from now on is captured. Press it again to stop, then tick the pages to repeat the marks on, at exactly the same place on each."><span class="annot-record-dot"></span><span class="annot-record-label">Record</span></button>
+        <button type="button" class="annot-tool" id="annotDiscardButton" onclick="annotMacroDiscard()" style="display:none;"
+                title="Stop recording and forget what was captured. The marks you made stay on this page.">Discard</button>
+        <button type="button" class="annot-tool" id="annotRepeatButton" onclick="annotMacroOpenPicker()" style="display:none;"
+                title="Choose the pages to repeat the last recording on.">Repeat on pages…</button>
       </div>
 
       <!-- The text row. It is always on show, not only while the Text tool is
@@ -3097,7 +3376,13 @@ kbd {
         <button type="button" class="annot-tool" onclick="annotXformCancel()" title="Put the page back as it was (Esc)">Cancel transform</button>
       </div>
 
-      <div id="annotStage"><canvas id="annotCanvas"></canvas><canvas id="annotSelCanvas"></canvas></div>
+      <!-- The recording badge lives INSIDE the stage, floating over its corner,
+           and not in a bar above it. A bar above the stage changes height as
+           its text grows, and anything that changes height up there slides
+           the page out from under the pointer in the middle of a stroke. The
+           badge takes no room, so the page stays exactly where it is, and it
+           ignores the pointer, so a mark can be made straight through it. -->
+      <div id="annotStage"><canvas id="annotCanvas"></canvas><canvas id="annotSelCanvas"></canvas><div class="annot-macro-badge" id="annotMacroBadge" style="display:none;"><span class="annot-record-dot is-live"></span><span class="annot-macro-status" id="annotMacroStatus" aria-live="polite">Recording</span></div></div>
 
       <p class="annot-hint">
         <strong>Erase / Paint:</strong> drag across the page — <strong>click then Shift-click</strong> joins the two points with a straight
@@ -3114,6 +3399,11 @@ kbd {
         the exact position shown while it moves. Shift while dragging keeps it on one line. Enter finishes the label; Shift+Enter starts a second line.
         <br><strong>Paste a picture:</strong> <kbd>Ctrl</kbd>+<kbd>V</kbd> (⌘V), or the button, drops whatever picture is on the clipboard onto the
         page with the resize handles already on it.
+        <br><strong>Record and repeat:</strong> when the same thing needs fixing on many pages, press <strong>Record</strong>, make the marks once —
+        rub the words out, put a new label where they were — and press <strong>Stop</strong>. Every page is then shown as a thumbnail: tick the
+        ones to repeat it on, and each gets the same marks <strong>at exactly the same place</strong>. Strokes, fills, clone stamps, selections,
+        moves, resizes, labels and pasted pictures are all recorded; zooming and panning are not. The whole batch is <strong>one Undo</strong> on
+        the Pages toolbar, and <strong>Repeat</strong> there puts the same recording on more pages later.
         <br><strong>Scroll</strong> over the page to zoom (down to single pixels); <strong>hold Space</strong> or the middle mouse button and drag to
         pan; <strong>scroll over a slider</strong> to change it. Erase, Paint, Clone, History and Line draw a ring at the exact size of the mark they
         will make, at whatever zoom you are on — and with <strong>Clone</strong> that ring is <strong>filled with the pixels it is about to
@@ -3144,6 +3434,60 @@ kbd {
 </div>
 
 <!-- ==========================================================================
+     RECORD AND REPEAT — THE PAGE PICKER
+     ==========================================================================
+     Opens when a recording made in the Touch-up editor is stopped (and from
+     the Pages toolbar's Repeat button afterwards). Every page of the document
+     is a thumbnail to tick; the recording is then repeated on each ticked page
+     at exactly the same place. It sits AFTER the editor's overlay in the
+     document on purpose: both are modals at the same level, and the later one
+     is the one drawn on top.
+     ========================================================================== -->
+<div class="modal-backdrop" id="macroPagesModal">
+  <div class="modal-card macro-modal-card" role="dialog" aria-modal="true" aria-labelledby="macroPagesTitle">
+    <div class="modal-header">
+      <span class="modal-title" id="macroPagesTitle">Repeat the recording on which pages?</span>
+      <button class="icon-button" id="macroPagesCloseButton" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="modal-body macro-modal-body">
+      <div class="explainer-note macro-summary">
+        <strong id="macroSummaryText"></strong>
+        Each step is repeated at exactly the same place on every page you tick. Clone stamps and fills use
+        that page's own paper, not this one's.
+      </div>
+
+      <div class="macro-tick-tools">
+        <button type="button" class="mini-button" id="macroTickAllButton">All</button>
+        <button type="button" class="mini-button" id="macroTickNoneButton">None</button>
+        <button type="button" class="mini-button" id="macroTickInvertButton">Invert</button>
+        <button type="button" class="mini-button" id="macroTickOddButton">Odd</button>
+        <button type="button" class="mini-button" id="macroTickEvenButton">Even</button>
+        <input type="text" class="range-input" id="macroRangeInput" placeholder="e.g. 2-10, 14" aria-label="Pages to tick, as a range" />
+        <button type="button" class="mini-button" id="macroTickRangeButton">Tick range</button>
+        <span class="macro-tick-hint">Click a page to tick it. Shift-click ticks every page back to the last one you clicked.</span>
+      </div>
+
+      <div class="macro-pages-grid" id="macroPagesGrid" aria-label="Pages of the document"></div>
+
+      <div class="macro-note" id="macroNoteText" style="display: none;"></div>
+
+      <div class="action-row macro-action-row">
+        <span class="macro-status" id="macroStatusText" aria-live="polite"></span>
+        <button type="button" class="secondary-button" id="macroCancelButton">Cancel</button>
+        <button type="button" class="secondary-button" id="macroOnlyThisButton"
+                title="Apply the touch-up to the page open in the editor and nothing else. The recording is kept, so it can still be repeated later from the Pages toolbar.">Apply to this page only</button>
+        <button type="button" class="primary-button" id="macroConfirmButton" disabled>Repeat on pages</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
      TOASTS + PROGRESS + VERSION
      ========================================================================== -->
 <div class="toast-stack" id="toastStack"></div>
@@ -3153,11 +3497,11 @@ kbd {
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
 </div>
 
-<div class="version-badge">Polymath PDF Studio v2.3.0</div>
+<div class="version-badge">Polymath PDF Studio v2.4.0</div>
 
 <script>
 /* ==========================================================================
-   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.3.0
+   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.4.0
    ==========================================================================
    Deliberately verbose and unminified so it stays easy to read and extend.
 
@@ -3182,8 +3526,9 @@ kbd {
      18. Mode switching
      19. TOUCH UP — the raster editor for one page
      20. COVER PAGES — the Big M cover from the Science and Maths portals
-     21. Keyboard shortcuts
-     22. Event wiring and boot
+     21. RECORD AND REPEAT — one page's touch-up, replayed on others
+     22. Keyboard shortcuts
+     23. Event wiring and boot
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -3501,7 +3846,15 @@ function countAllTextEdits() {
    4. TOAST AND PROGRESS FEEDBACK
    -------------------------------------------------------------------------- */
 
+/* Raised while a recording is being repeated on other pages (section 21). The
+   touch-up tools announce nearly everything they do — "Selection filled",
+   "Clone source set" — which is right for one person making one mark and would
+   be a few hundred toasts for a recording run over thirty pages. A count, not
+   a flag, so nested sections can each raise and lower it safely. */
+let toastMuteDepth = 0;
+
 function showToast(message, variant) {
+  if (toastMuteDepth > 0) { return; }
   const toastStack = getElement('toastStack');
   const toastElement = document.createElement('div');
   toastElement.className = 'toast' + (variant ? ' is-' + variant : '');
@@ -3949,29 +4302,10 @@ function applyRangeSelection(rangeText) {
     return;
   }
 
-  const matchedIds = [];
-
-  trimmedText.split(',').forEach(function (segment) {
-    const cleanSegment = segment.trim();
-    if (cleanSegment.length === 0) { return; }
-
-    const rangeMatch = cleanSegment.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-    const singleMatch = cleanSegment.match(/^(\d+)$/);
-
-    if (rangeMatch) {
-      const lowerBound = Math.min(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
-      const upperBound = Math.max(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
-      for (let position = lowerBound; position <= upperBound; position += 1) {
-        if (position >= 1 && position <= pageList.length) {
-          matchedIds.push(pageList[position - 1].uniqueId);
-        }
-      }
-    } else if (singleMatch) {
-      const position = parseInt(singleMatch[1], 10);
-      if (position >= 1 && position <= pageList.length) {
-        matchedIds.push(pageList[position - 1].uniqueId);
-      }
-    }
+  /* One parser for every "1-4, 9" box in the app (the page picker of a
+     recorded touch-up has one too — section 21). */
+  const matchedIds = parsePageRangeText(trimmedText).map(function (pageNumber) {
+    return pageList[pageNumber - 1].uniqueId;
   });
 
   if (matchedIds.length === 0) {
@@ -4571,6 +4905,57 @@ const ICON_TRASH =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M3 6h18"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
 
+/**
+ * The thumbnail box for one page: its cached picture if there is one, a
+ * spinner while one is being rendered, or the dashed "Blank" sheet for a page
+ * with nothing on it. The page grid uses it, and so does the page picker that
+ * a recorded touch-up opens (section 21) — any element carrying the same
+ * `data-cache-key` is filled in by applyThumbnailToVisibleCards() the moment
+ * its thumbnail arrives, wherever on the page it happens to be.
+ */
+function buildThumbnailFrameForPage(pageEntry, pageIndex) {
+  const thumbnailFrame = document.createElement('div');
+  thumbnailFrame.className = 'thumbnail-frame';
+
+  if (pageEntry.isBlank && !pageEntry.touchUp) {
+    const blankMarker = document.createElement('div');
+    blankMarker.className = 'blank-page-marker';
+    blankMarker.textContent = 'Blank';
+
+    /* The frame is a fixed 1:1.35 portrait box, so a page narrower than that
+       is limited by its height and anything wider by its width. */
+    const pageAspect = blankPageDisplayAspect(pageEntry);
+    if (pageAspect < THUMBNAIL_FRAME_ASPECT) {
+      blankMarker.style.height = '100%';
+      blankMarker.style.width = (pageAspect / THUMBNAIL_FRAME_ASPECT * 100) + '%';
+    } else {
+      blankMarker.style.width = '100%';
+      blankMarker.style.height = (THUMBNAIL_FRAME_ASPECT / pageAspect * 100) + '%';
+    }
+
+    thumbnailFrame.appendChild(blankMarker);
+    return thumbnailFrame;
+  }
+
+  const cacheKey = buildThumbnailCacheKey(pageEntry);
+  thumbnailFrame.setAttribute('data-cache-key', cacheKey);
+
+  if (thumbnailCache.has(cacheKey)) {
+    const imageElement = document.createElement('img');
+    imageElement.src = thumbnailCache.get(cacheKey);
+    imageElement.alt = 'Page ' + (pageIndex + 1) + ' thumbnail';
+    imageElement.draggable = false;
+    thumbnailFrame.appendChild(imageElement);
+  } else {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'thumbnail-placeholder';
+    thumbnailFrame.appendChild(placeholder);
+    queueThumbnailRender(pageEntry);
+  }
+
+  return thumbnailFrame;
+}
+
 function renderPageGrid() {
   const pageGrid = getElement('pageGrid');
   pageGrid.innerHTML = '';
@@ -4592,45 +4977,7 @@ function renderPageGrid() {
     cardElement.appendChild(selectionBadge);
 
     /* --- Thumbnail --- */
-    const thumbnailFrame = document.createElement('div');
-    thumbnailFrame.className = 'thumbnail-frame';
-
-    if (pageEntry.isBlank && !pageEntry.touchUp) {
-      const blankMarker = document.createElement('div');
-      blankMarker.className = 'blank-page-marker';
-      blankMarker.textContent = 'Blank';
-
-      /* The frame is a fixed 1:1.35 portrait box, so a page narrower than that
-         is limited by its height and anything wider by its width. */
-      const pageAspect = blankPageDisplayAspect(pageEntry);
-      if (pageAspect < THUMBNAIL_FRAME_ASPECT) {
-        blankMarker.style.height = '100%';
-        blankMarker.style.width = (pageAspect / THUMBNAIL_FRAME_ASPECT * 100) + '%';
-      } else {
-        blankMarker.style.width = '100%';
-        blankMarker.style.height = (THUMBNAIL_FRAME_ASPECT / pageAspect * 100) + '%';
-      }
-
-      thumbnailFrame.appendChild(blankMarker);
-    } else {
-      const cacheKey = buildThumbnailCacheKey(pageEntry);
-      thumbnailFrame.setAttribute('data-cache-key', cacheKey);
-
-      if (thumbnailCache.has(cacheKey)) {
-        const imageElement = document.createElement('img');
-        imageElement.src = thumbnailCache.get(cacheKey);
-        imageElement.alt = 'Page ' + (pageIndex + 1) + ' thumbnail';
-        imageElement.draggable = false;
-        thumbnailFrame.appendChild(imageElement);
-      } else {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'thumbnail-placeholder';
-        thumbnailFrame.appendChild(placeholder);
-        queueThumbnailRender(pageEntry);
-      }
-    }
-
-    cardElement.appendChild(thumbnailFrame);
+    cardElement.appendChild(buildThumbnailFrameForPage(pageEntry, pageIndex));
 
     /* --- Hover actions --- */
     const cardActions = document.createElement('div');
@@ -4649,8 +4996,8 @@ function renderPageGrid() {
       },
       {
         label: pageEntry.touchUp
-          ? 'Touch up this page again (erase, paint, clone, label)'
-          : 'Touch up this page — erase, paint, clone, select, straighten, label',
+          ? 'Touch up this page again (erase, paint, clone, label) — or double-click the page'
+          : 'Touch up this page — erase, paint, clone, select, straighten, label. Double-clicking the page does the same.',
         icon: ICON_TOUCH_UP,
         action: 'touch-up',
         style: ''
@@ -4858,6 +5205,9 @@ function updateToolbarAvailability() {
   /* The touch-up editor is one page at a time: it renders that page to pixels
      and hands it a canvas, which has no sensible meaning for a run of twelve. */
   getElement('touchUpButton').disabled = selectedPageIds.length !== 1;
+
+  /* Repeat is offered once a recording exists and there are pages to put it on. */
+  annotMacroSyncUi();
 
   getElement('pasteButton').disabled = !hasClipboard;
   getElement('downloadAllButton').disabled = !hasPages;
@@ -7267,20 +7617,21 @@ function _annotEnsureFont(text, sizePx) {
   catch (loadError) { return Promise.resolve(); }
 }
 
-// The editor itself, opened on a picture from ANYWHERE. `target` says where
-// Apply writes it back to — here that is always a page of the open document
-// (`pageId`), and adding another destination means adding a branch in
-// applyAnnotTool rather than forking the tool.
-function _annotOpenSrc(srcP, target, title) {
-  srcP.then(_loadImageEl).then(img => {
-    const canvas = document.getElementById('annotCanvas');
-    const cap = 2700; // keep the working canvas (and undo snapshots) sane
+const ANNOT_CANVAS_CAP = 2700;   // keep the working canvas (and undo snapshots) sane
+
+/* One editing session: a picture drawn onto a canvas, plus every setting the
+   tools read. Split out of _annotOpenSrc so there are TWO ways to get one —
+   the editor on screen, on its own two canvases, and a recording being
+   repeated on another page (section 21), which builds exactly the same session
+   on a pair of canvases nobody ever sees and runs the same tool code on it.
+   One builder, so the two can never disagree about what a session contains. */
+function _annotBuildSession(img, canvas, selCanvas, target) {
+    const cap = ANNOT_CANVAS_CAP;
     const scale = Math.min(1, cap / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
     canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
     canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const selCanvas = document.getElementById('annotSelCanvas');
     if (selCanvas) { selCanvas.width = canvas.width; selCanvas.height = canvas.height; }
     // The picture exactly as it was opened, kept for the history brush to paint
     // back from. It is never written to, so "the original" stays the original
@@ -7288,7 +7639,7 @@ function _annotOpenSrc(srcP, target, title) {
     const orig = document.createElement('canvas');
     orig.width = canvas.width; orig.height = canvas.height;
     orig.getContext('2d').drawImage(canvas, 0, 0);
-    _annot = { pageId: target.pageId || null, pageRotation: target.pageRotation || 0,
+    return { pageId: target.pageId || null, pageRotation: target.pageRotation || 0,
       // WHAT ERASE LEAVES BEHIND. A page is paper, so erasing a word means
       // painting it white — the default here. The toolbar button flips it to a
       // real hole for the times a cut-out is what is wanted; anything still
@@ -7304,7 +7655,19 @@ function _annotOpenSrc(srcP, target, title) {
       // Where the pointer is, in STAGE coordinates, and how long the size badge
       // stays up after a change — see the brush cursor below.
       ptr: null, ptrIn: false, hudUntil: 0, hudTimer: null };
+}
+
+// The editor itself, opened on a picture from ANYWHERE. `target` says where
+// Apply writes it back to — here that is always a page of the open document
+// (`pageId`), and adding another destination means adding a branch in
+// applyAnnotTool rather than forking the tool.
+function _annotOpenSrc(srcP, target, title) {
+  srcP.then(_loadImageEl).then(img => {
+    const canvas = document.getElementById('annotCanvas');
+    const selCanvas = document.getElementById('annotSelCanvas');
+    _annot = _annotBuildSession(img, canvas, selCanvas, target);
     _annotSelSyncBar();
+    annotMacroSyncUi();        // the Record button starts each visit idle
     _annotAiBarInit();
     if (!_annotAntsRunning) _annotAntsLoop();
     _annotSyncControls();
@@ -9503,20 +9866,19 @@ function _annotPlaceText(p) {
        The face was requested when the label was created and again whenever the
        toolbar changed, so by the time anything has been typed it is loaded. */
     if (hasWords && _annot) {
-      _annotPushHistory();
-      const ctx = _annot.ctx;
-      ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = box._text.color || _annot.color;
-      ctx.textBaseline = 'top';
-      ctx.font = _annotFontString(box._text, box._size);
-      const lineHeight = box._size * ANNOT_TEXT_LINE_HEIGHT;
-      const halfLeading = (lineHeight - box._size) / 2;
-      lines.forEach(function (line, index) {
-        if (line === '') return;
-        ctx.fillText(line, box._ax, box._ay + halfLeading + index * lineHeight);
-      });
-      ctx.restore();
+      const label = {
+        lines: lines,
+        ax: box._ax, ay: box._ay,
+        size: box._size,
+        color: box._text.color || _annot.color,
+        text: { family: box._text.family, label: box._text.label, bold: !!box._text.bold, italic: !!box._text.italic }
+      };
+      /* A recording keeps the label itself — the words, the face and where it
+         ended up after any dragging — rather than the clicks and keystrokes
+         that made it, so it can be burned onto another page at this exact
+         spot without a text box ever being opened there (section 21). */
+      annotMacroNoteLabel(label);
+      _annotBurnLabel(label);
     }
     _annotHideGuides();
     if (box.parentNode) box.parentNode.removeChild(box);
@@ -9537,6 +9899,35 @@ function _annotPlaceText(p) {
     event.stopPropagation();               // arrow keys and letters belong to the label
   });
   field.addEventListener('blur', function () { if (!armed && !dragging) commit(); });
+}
+
+/**
+ * Burns one label into the picture: one fillText per line at the label's own
+ * canvas position. This is the ONLY place a label becomes pixels — the live
+ * text box calls it when it is finished, and a recording being repeated on
+ * another page calls it with the same label — so the two cannot drift apart.
+ *
+ * `label` is { lines, ax, ay, size, color, text: { family, bold, italic } }.
+ * `textBaseline` is 'top', so the half-leading CSS puts above the first line
+ * has to be added back or the words land slightly high — the one place the
+ * live box and the canvas could disagree.
+ */
+function _annotBurnLabel(label) {
+  if (!_annot) return;
+  _annotPushHistory();
+  const ctx = _annot.ctx;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = label.color;
+  ctx.textBaseline = 'top';
+  ctx.font = _annotFontString(label.text, label.size);
+  const lineHeight = label.size * ANNOT_TEXT_LINE_HEIGHT;
+  const halfLeading = (lineHeight - label.size) / 2;
+  label.lines.forEach(function (line, index) {
+    if (line === '') return;
+    ctx.fillText(line, label.ax, label.ay + halfLeading + index * lineHeight);
+  });
+  ctx.restore();
 }
 
 /** Settle every label that is still open — called before anything that
@@ -9620,6 +10011,31 @@ function rotateCanvasBy(sourceCanvas, degrees) {
   return turned;
 }
 
+/* The two halves of "the picture becomes what the page stores", shared by
+   Apply below and by a recording repeated across pages (section 21), so a
+   page touched up by hand and a page touched up by a replay are stored in
+   exactly the same way.
+
+   First half, while the session is still open: flatten onto white and turn
+   the picture back to the page's own orientation — the editor rendered it
+   turned BY the rotation, so storing it means turning it back the other way. */
+function _annotUnrotatedFlat(session) {
+  const flattened = _annotFlattenOntoWhite(session.canvas);
+  return rotateCanvasBy(flattened, -normaliseRotation(session.pageRotation));
+}
+
+/* Second half: fit it to the page's proportions and encode it. The result is
+   the object that goes on the page descriptor as `touchUp`. */
+function _annotTouchUpFromCanvas(unrotatedCanvas, pageEntry) {
+  const stored = _annotFitToPageAspect(unrotatedCanvas, pageEntry);
+  return {
+    id: createUniqueId('touchup'),
+    dataUrl: stored.toDataURL('image/png'),
+    pixelWidth: stored.width,
+    pixelHeight: stored.height
+  };
+}
+
 async function applyAnnotTool() {
   if (!_annot) { return; }
 
@@ -9629,11 +10045,7 @@ async function applyAnnotTool() {
   _annotCommitTextBoxes();
 
   const pageId = _annot.pageId;
-  const displayRotation = normaliseRotation(_annot.pageRotation);
-  const flattened = _annotFlattenOntoWhite(_annot.canvas);
-  /* Back to the page's own orientation: the editor rendered it turned BY the
-     rotation, so storing it means turning it back the other way. */
-  const unrotated = rotateCanvasBy(flattened, -displayRotation);
+  const unrotated = _annotUnrotatedFlat(_annot);
 
   closeAnnotTool();
 
@@ -9643,21 +10055,11 @@ async function applyAnnotTool() {
     return;
   }
 
-  const stored = _annotFitToPageAspect(unrotated, pageList[targetIndex]);
-  const dataUrl = stored.toDataURL('image/png');
-  const rasterWidth = stored.width;
-  const rasterHeight = stored.height;
-
   pushHistorySnapshot();
   /* The descriptor is REPLACED, never mutated: the undo stack holds shallow
      copies of these objects, so editing one in place would rewrite history. */
   pageList[targetIndex] = Object.assign({}, pageList[targetIndex], {
-    touchUp: {
-      id: createUniqueId('touchup'),
-      dataUrl: dataUrl,
-      pixelWidth: rasterWidth,
-      pixelHeight: rasterHeight
-    }
+    touchUp: _annotTouchUpFromCanvas(unrotated, pageList[targetIndex])
   });
 
   renderEverything();
@@ -12501,7 +12903,1466 @@ function wireCoverPageDialog() {
 }
 
 /* ==========================================================================
-   21. KEYBOARD SHORTCUTS
+   21. RECORD AND REPEAT — ONE PAGE'S TOUCH-UP, REPLAYED ON OTHERS
+   ==========================================================================
+   The job this exists for: the same thing is wrong on every page. A school's
+   name in the header of a forty-page paper, a page number to cover, a stamp in
+   the same corner of every scan. Fixing it once is a minute's work in the
+   Touch-up editor; fixing it forty times is the afternoon.
+
+   So the editor can RECORD. Press Record, make the marks — rub the words out,
+   put a new label where they were — press Stop, and the app asks which pages
+   to repeat it on, showing every page as a thumbnail to tick. Each ticked page
+   then gets the same marks AT THE SAME PLACE, to the pixel.
+
+   WHAT A RECORDING IS
+   ----------------------------------------------------------------------------
+   Not a picture of the result. A picture of "what changed" cannot be laid on
+   another page: rubbing out the words "Page 1" changes only the pixels of
+   those two words, and stamping that difference over "Page 2" would leave half
+   of the 2 behind. And a clone stamp or a smart fill on another page has to
+   use THAT page's paper, not the first page's.
+
+   A recording is the list of things that were DONE, in order, in the editor's
+   own terms and in canvas pixels:
+
+     down / move / up   every pointer gesture on the picture — a brush stroke,
+                        a line, a bucket click, a selection being dragged out,
+                        a handle being pulled — with its position, Shift / Alt,
+                        and the colour, brush size, match and erase-to setting
+                        in force when it began
+     tool               each change of tool (which also settles or opens a
+                        resize / turn, exactly as it does by hand)
+     call               each toolbar command: Delete, the three fills, Undo,
+                        every control on the transform bar
+     label              a finished text label — its words, face, size, colour
+                        and final position, not the keystrokes that made it
+     paste              a picture pasted in, kept as the picture itself
+     ai                 a Regenerate instruction (see the note on it below)
+
+   Zooming and panning are not recorded: they change what is LOOKED at, not
+   what is on the page. (The zoom at each pointer-down is kept, because a
+   resize handle is judged "under the pointer" in screen pixels.)
+
+   HOW IT IS REPLAYED
+   ----------------------------------------------------------------------------
+   Through the editor's own code. Nothing in here redraws a brush stroke or
+   re-implements the bucket: a replay builds a real editing session
+   (_annotBuildSession — the same one the editor opens with) on a canvas nobody
+   sees, loads the target page into it, and feeds the recorded steps to the
+   very functions the pointer and the toolbar call: _annotDown, _annotMove,
+   _annotUp, _annotSetTool, annotSelDelete and the rest. The result is then
+   stored the way Apply stores one (_annotUnrotatedFlat, _annotTouchUpFromCanvas).
+   So a replayed stroke is not "like" the recorded stroke, it IS the same code
+   run with the same numbers — and any tool the editor gains is replayable the
+   day it is added, provided its entry point is listed in annotMacroInstallHooks.
+
+   The recorder gets its steps the same way, from outside: each of those
+   functions is wrapped once, at load, so the ported editor code is left as it
+   is (its one inside hook is the label, which is a closure and cannot be
+   reached from out here). A wrapped function that calls another wrapped
+   function — a tool switch that settles a transform, Smart fill that runs the
+   plain fill first — is recorded ONCE, as the outer call, because replaying
+   the outer call makes the inner one happen again by itself.
+
+   WHAT "THE SAME PLACE" MEANS
+   ----------------------------------------------------------------------------
+   Every page is rendered for touch-up at the same width, so pages of the same
+   size and turn have rasters of the same pixel size and a recorded position is
+   used exactly as it is: the same pixel, counted from the top-left corner.
+   A page of a DIFFERENT size or shape has no "same pixel". There, "the same
+   place" is taken to mean what it would mean with a ruler: the same DISTANCE
+   from the top-left corner of the paper, with the mark the same physical size.
+   A recording made 15mm down an A4 page lands 15mm down a landscape page, and
+   a brush that was 7mm wide is 7mm wide — so positions, brush sizes and label
+   sizes are all multiplied by one factor, the ratio of the two rasters' pixels
+   per point. The picker flags those pages so they can be checked or left out.
+
+   THE PAGE IT WAS RECORDED ON keeps everything done to it, recorded or not:
+   it is simply applied, as Apply to page would. The whole batch — that page
+   and every page the recording was repeated on — is ONE step of the Pages
+   undo, so a recording that turns out wrong comes off every page at once.
+
+   A PAGE THE RECORDING MAKES NO DIFFERENCE TO is left exactly as it was. If
+   the words being rubbed out are simply not on page 9, giving page 9 a
+   touch-up would only turn its sharp text into a picture of the same text.
+   And a page is repeated on whole or not at all: if a step fails there, the
+   page keeps what it had, and the app says which pages those were.
+
+   REGENERATE in a recording is repeated honestly, which means it is run again
+   for each page: that page's picture is sent to the image model with the same
+   instruction. The picker says so before anything is sent.
+   ========================================================================== */
+
+/* --- 21a. State ------------------------------------------------------------- */
+
+/* Rasters within half a percent of each other count as the same size: page
+   heights are rounded down to whole pixels, so two A4 pages from different
+   scanners can differ by a pixel without being different paper. */
+const ANNOT_MACRO_SIZE_SLACK = 0.005;
+
+const annotMacro = {
+  recording: false,     // Record has been pressed and Stop has not
+  entries: [],          // the steps captured so far
+  start: null,          // how the session stood when Record was pressed
+  pointerOpen: false,   // a recorded pointer-down is waiting for its pointer-up
+  depth: 0,             // how many wrapped editor functions are on the stack
+  outerIndex: null,     // where the outermost of them put its step
+  replaying: false,     // a recording is being fed back in — capture nothing
+  busy: false,          // a batch is running across pages
+  aiFailures: 0,        // Regenerate steps that came back with nothing, this batch
+  last: null            // the last finished recording, kept until the next one
+};
+
+/* The editor functions as they were before they were wrapped. */
+const annotMacroOriginals = {};
+
+/* What each kind of step is called, singular and plural, and whether it
+   changes the picture. A recording with no step that changes anything (a
+   selection dragged out and nothing done with it) is not worth repeating. */
+const ANNOT_MACRO_STEP_NAMES = {
+  erase: { one: 'erase stroke', many: 'erase strokes', changes: true },
+  paint: { one: 'paint stroke', many: 'paint strokes', changes: true },
+  history: { one: 'history-brush stroke', many: 'history-brush strokes', changes: true },
+  clone: { one: 'clone stroke', many: 'clone strokes', changes: true },
+  line: { one: 'line', many: 'lines', changes: true },
+  fill: { one: 'paint-bucket fill', many: 'paint-bucket fills', changes: true },
+  select: { one: 'selection', many: 'selections', changes: false },
+  move: { one: 'move', many: 'moves', changes: true },
+  transform: { one: 'resize / turn', many: 'resizes / turns', changes: true },
+  deleteArea: { one: 'delete', many: 'deletes', changes: true },
+  fillColour: { one: 'colour fill', many: 'colour fills', changes: true },
+  patchFill: { one: 'fill from surroundings', many: 'fills from surroundings', changes: true },
+  smartFill: { one: 'smart fill', many: 'smart fills', changes: true },
+  undo: { one: 'undo', many: 'undos', changes: false },
+  label: { one: 'text label', many: 'text labels', changes: true },
+  paste: { one: 'pasted picture', many: 'pasted pictures', changes: true },
+  ai: { one: 'Regenerate', many: 'Regenerates', changes: true }
+};
+
+/* Which step name a toolbar command counts as. Commands not listed here (the
+   transform bar's sliders, Deselect) adjust something that is already counted. */
+const ANNOT_MACRO_CALL_STEPS = {
+  annotSelDelete: 'deleteArea',
+  annotSelFillColour: 'fillColour',
+  annotSelPatchFill: 'patchFill',
+  annotSelSmartFill: 'smartFill',
+  annotUndo: 'undo'
+};
+
+/* Every toolbar command that changes the picture, the selection or an open
+   transform. Each is recorded as "this function, with these arguments". */
+const ANNOT_MACRO_COMMANDS = [
+  'annotUndo',
+  'annotSelDelete', 'annotSelFillColour', 'annotSelPatchFill', 'annotSelSmartFill', 'annotSelClear',
+  'annotXformSetScale', 'annotXformSetLock', 'annotXformFlip', 'annotXformScaleNudge',
+  'annotXformSet', 'annotXformNudge', 'annotXformSetGrow', 'annotXformStraightenStart',
+  'annotXformReset', 'annotXformApply', 'annotXformCancel'
+];
+
+/* --- 21b. Snapshots of the session ------------------------------------------ */
+
+/**
+ * The settings a tool reads when it makes a mark. Taken at every pointer-down
+ * and every command rather than recording each slider move, so it does not
+ * matter HOW a setting was changed — the slider, the wheel, the [ and ] keys —
+ * only what it was when the mark was made. The toolbar's inputs are the source
+ * of truth for colour, size and match, so they are read in first.
+ */
+function annotMacroSnapshotState() {
+  _annotSyncControls();
+  return {
+    color: _annot.color,
+    size: _annot.size,
+    tol: _annot.tol,
+    eraseTo: _annot.eraseTo,
+    text: {
+      family: _annot.text.family,
+      label: _annot.text.label,
+      size: _annot.text.size,
+      bold: !!_annot.text.bold,
+      italic: !!_annot.text.italic
+    }
+  };
+}
+
+function annotMacroCopyPoint(point) {
+  return point ? { x: point.x, y: point.y } : null;
+}
+
+/** A selection, detached from the session it came from. */
+function annotMacroCopySelection(selection) {
+  if (!selection) { return null; }
+  if (selection.pts) { return { pts: selection.pts.map(annotMacroCopyPoint) }; }
+  return {
+    x: selection.x, y: selection.y, w: selection.w, h: selection.h,
+    mask: new Uint8Array(selection.mask)
+  };
+}
+
+/** A pasted picture as a data URL, so the recording owns its own copy. */
+function annotMacroImageDataUrl(image) {
+  if (image && typeof image.src === 'string' && image.src.indexOf('data:') === 0) { return image.src; }
+  const width = (image && (image.naturalWidth || image.width)) || 1;
+  const height = (image && (image.naturalHeight || image.height)) || 1;
+  const copy = document.createElement('canvas');
+  copy.width = width;
+  copy.height = height;
+  copy.getContext('2d').drawImage(image, 0, 0);
+  return copy.toDataURL('image/png');
+}
+
+/* --- 21c. Capturing ---------------------------------------------------------- */
+
+/** True while a step made right now belongs in the recording. */
+function annotMacroIsCapturing() {
+  return annotMacro.recording && !annotMacro.replaying && annotMacro.depth === 0 && !!_annot;
+}
+
+function annotMacroPush(entry) {
+  annotMacro.entries.push(entry);
+  /* Pointer moves arrive a hundred times a second and change nothing the
+     status line shows, so they do not redraw it. */
+  if (entry.kind !== 'move') { annotMacroSyncUi(); }
+  return annotMacro.entries.length - 1;
+}
+
+/**
+ * Wraps one editor function so that, while recording, a call to it is noted
+ * before it runs. `capture` receives the call's own arguments and decides what
+ * to note (or nothing). Only the OUTERMOST wrapped call is noted — see the
+ * section header — which is what `depth` counts.
+ */
+function annotMacroInstall(name, capture) {
+  const original = window[name];
+  if (typeof original !== 'function') {
+    console.warn('Record and repeat: the editor has no function called ' + name + '.');
+    return;
+  }
+  annotMacroOriginals[name] = original;
+
+  window[name] = function () {
+    const outermost = annotMacro.depth === 0;
+    if (annotMacroIsCapturing()) {
+      const before = annotMacro.entries.length;
+      try {
+        capture.apply(this, arguments);
+      } catch (captureError) {
+        console.warn('Record and repeat could not note a call to ' + name, captureError);
+      }
+      annotMacro.outerIndex = annotMacro.entries.length > before ? before : null;
+    }
+
+    annotMacro.depth += 1;
+    try {
+      return original.apply(this, arguments);
+    } finally {
+      annotMacro.depth -= 1;
+      if (outermost) { annotMacro.outerIndex = null; }
+    }
+  };
+}
+
+/**
+ * The editor's one inside hook: a text label that has just been finished.
+ * A label can be settled from INSIDE another step — pasting a picture, or
+ * opening a resize, burns any label still being typed before it does anything
+ * else — and by then that outer step has already been noted. The label has to
+ * come before it in the recording, because it came before it on the page.
+ */
+function annotMacroNoteLabel(label) {
+  if (!annotMacro.recording || annotMacro.replaying || !_annot) { return; }
+
+  const entry = {
+    kind: 'label',
+    label: {
+      lines: label.lines.slice(0),
+      ax: label.ax, ay: label.ay,
+      size: label.size,
+      color: label.color,
+      text: Object.assign({}, label.text)
+    }
+  };
+
+  if (annotMacro.depth > 0 && annotMacro.outerIndex !== null) {
+    annotMacro.entries.splice(annotMacro.outerIndex, 0, entry);
+    annotMacro.outerIndex += 1;
+    annotMacroSyncUi();
+  } else {
+    annotMacroPush(entry);
+  }
+}
+
+/**
+ * Wraps the editor's entry points. Run once, as the script loads; every later
+ * call from the pointer listeners, the toolbar's onclick attributes and the
+ * keyboard handler then goes through the wrapper, because they all look these
+ * names up at the moment they call them.
+ */
+function annotMacroInstallHooks() {
+  /* A replay hands the handlers a stand-in event that carries its canvas
+     position ready-made; a real pointer event is converted as it always was. */
+  annotMacroOriginals._annotPt = window._annotPt;
+  window._annotPt = function (pointerEvent) {
+    if (pointerEvent && pointerEvent.annotMacroPoint) { return pointerEvent.annotMacroPoint; }
+    return annotMacroOriginals._annotPt(pointerEvent);
+  };
+
+  annotMacroInstall('_annotDown', function (pointerEvent) {
+    /* Clicking with the Text tool only opens a box to type in. The label is
+       noted when it is finished, with where it ended up. */
+    if (_annot.tool === 'text') { return; }
+    const point = annotMacroOriginals._annotPt(pointerEvent);
+    annotMacroPush({
+      kind: 'down',
+      x: point.x, y: point.y,
+      alt: !!pointerEvent.altKey,
+      shift: !!pointerEvent.shiftKey,
+      tool: _annot.tool,
+      /* The clone stamp's first click (and any Alt+click) picks where to copy
+         FROM; it makes no mark, and the summary should not count it as one. */
+      setsCloneSource: _annot.tool === 'clone' && (!!pointerEvent.altKey || !_annot.cloneSrc),
+      scale: _annotDisplayScale() || 1,
+      state: annotMacroSnapshotState()
+    });
+    annotMacro.pointerOpen = true;
+  });
+
+  annotMacroInstall('_annotMove', function (pointerEvent) {
+    if (!annotMacro.pointerOpen || !_annot.drawing) { return; }
+    const point = annotMacroOriginals._annotPt(pointerEvent);
+    annotMacroPush({ kind: 'move', x: point.x, y: point.y, shift: !!pointerEvent.shiftKey });
+  });
+
+  /* _annotUp runs on EVERY pointer-up in the window, a press on a toolbar
+     button included. Only the one that ends a recorded press is a step. */
+  annotMacroInstall('_annotUp', function () {
+    if (!annotMacro.pointerOpen) { return; }
+    annotMacro.pointerOpen = false;
+    annotMacroPush({ kind: 'up' });
+  });
+
+  annotMacroInstall('_annotSetTool', function (tool) {
+    annotMacroPush({ kind: 'tool', tool: String(tool), state: annotMacroSnapshotState() });
+  });
+
+  ANNOT_MACRO_COMMANDS.forEach(function (name) {
+    annotMacroInstall(name, function () {
+      annotMacroPush({
+        kind: 'call',
+        name: name,
+        args: Array.prototype.slice.call(arguments),
+        state: annotMacroSnapshotState()
+      });
+    });
+  });
+
+  annotMacroInstall('_annotPasteImage', function (image) {
+    annotMacroPush({ kind: 'paste', dataUrl: annotMacroImageDataUrl(image), state: annotMacroSnapshotState() });
+  });
+
+  annotMacroInstall('annotAiRegen', function () {
+    const promptField = document.getElementById('annotAiPrompt');
+    const instruction = ((promptField && promptField.value) || '').trim();
+    /* The two cases the function itself refuses: nothing typed, or a run
+       already in flight. Neither does anything, so neither is a step. */
+    if (!instruction || _annot.aiFillBusy) { return; }
+    annotMacroPush({ kind: 'ai', prompt: instruction, state: annotMacroSnapshotState() });
+  });
+
+  /* A Regenerate that fails swallows its own error (it shows a toast). While
+     a batch is running that toast is muted, so the failure is counted here. */
+  annotMacroOriginals.generateEnhancedImageDataUrl = window.generateEnhancedImageDataUrl;
+  window.generateEnhancedImageDataUrl = async function () {
+    try {
+      return await annotMacroOriginals.generateEnhancedImageDataUrl.apply(this, arguments);
+    } catch (modelError) {
+      if (annotMacro.replaying) { annotMacro.aiFailures += 1; }
+      throw modelError;
+    }
+  };
+
+  /* Apply to page, pressed while still recording, is "I have finished": the
+     recording stops and the page picker opens, where applying to this page
+     alone is one of the choices. If nothing was recorded it is a plain Apply. */
+  annotMacroOriginals.applyAnnotTool = window.applyAnnotTool;
+  window.applyAnnotTool = function () {
+    if (annotMacro.recording && _annot && !annotMacro.replaying) {
+      if (annotMacroStop()) { return Promise.resolve(); }
+    }
+    return annotMacroOriginals.applyAnnotTool.apply(this, arguments);
+  };
+
+  /* Closing the editor without applying throws the page's marks away, and a
+     recording of marks that were thrown away would be a trap. */
+  annotMacroOriginals.closeAnnotTool = window.closeAnnotTool;
+  window.closeAnnotTool = function () {
+    if (annotMacro.recording && !annotMacro.replaying) {
+      annotMacro.recording = false;
+      annotMacro.entries = [];
+      annotMacro.pointerOpen = false;
+      showToast('Recording discarded with the touch-up.', 'info');
+    }
+    const result = annotMacroOriginals.closeAnnotTool.apply(this, arguments);
+    annotMacroSyncUi();
+    return result;
+  };
+
+  /* While the page picker is open over the editor, the editor's single-key
+     shortcuts must not fire underneath it: Escape there would cancel a
+     selection or close the whole editor, and E, B, G … would switch tools. */
+  annotMacroOriginals._annotKeyDown = window._annotKeyDown;
+  window._annotKeyDown = function (keyEvent) {
+    if (annotMacro.busy) { return; }
+    if (annotMacroPickerIsOpen()) {
+      if (keyEvent.key === 'Escape') {
+        keyEvent.preventDefault();
+        keyEvent.stopPropagation();
+        annotMacroClosePicker();
+      }
+      return;
+    }
+    return annotMacroOriginals._annotKeyDown.apply(this, arguments);
+  };
+}
+
+/* --- 21d. Record, Stop, Discard ---------------------------------------------- */
+
+/** Settles a resize / turn that is open: a real change is kept, an untouched one dropped. */
+function annotMacroSettleOpenTransform() {
+  if (!_annot || !_annot.xform) { return; }
+  if (_annotXformIsIdentity(_annot.xform)) { annotXformCancel(true); } else { annotXformApply(true); }
+}
+
+function annotMacroStart() {
+  if (!_annot || annotMacro.recording || annotMacro.busy) { return; }
+
+  /* A recording starts from a settled picture: a transform half-way through,
+     or a label still being typed, belongs to what came BEFORE Record. */
+  annotMacroSettleOpenTransform();
+  _annotCommitTextBoxes();
+
+  annotMacro.entries = [];
+  annotMacro.pointerOpen = false;
+  annotMacro.outerIndex = null;
+  const sourceIndex = findPageIndexById(_annot.pageId);
+  const sourceSize = sourceIndex === -1
+    ? { width: BLANK_PAGE_WIDTH_POINTS, height: BLANK_PAGE_HEIGHT_POINTS }
+    : displayedPageSize(pageList[sourceIndex]);
+
+  annotMacro.start = {
+    pageId: _annot.pageId,
+    canvasWidth: _annot.canvas.width,
+    canvasHeight: _annot.canvas.height,
+    /* The paper the recording was made on, as it faced the reader, and how
+       many canvas pixels there were to each of its points — what a position
+       has to be measured against on a page of another size. */
+    pagePointWidth: sourceSize.width,
+    pagePointHeight: sourceSize.height,
+    pixelsPerPoint: _annot.canvas.width / Math.max(1, sourceSize.width),
+    tool: _annot.tool,
+    state: annotMacroSnapshotState(),
+    /* Things set up before Record that the recorded steps may lean on: a clone
+       source already chosen, the end of the last stroke (for a Shift-click
+       join), an area already selected. */
+    cloneSrc: annotMacroCopyPoint(_annot.cloneSrc),
+    anchor: annotMacroCopyPoint(_annot.anchor),
+    sel: annotMacroCopySelection(_annot.sel)
+  };
+  annotMacro.recording = true;
+  annotMacroSyncUi();
+  showToast('Recording. Make your marks, then press Stop to choose the pages to repeat them on.', 'info');
+}
+
+/**
+ * Ends the recording. Returns it — and opens the page picker — when it holds
+ * something worth repeating; returns null (and says why) when it does not.
+ */
+function annotMacroStop() {
+  if (!annotMacro.recording) { return null; }
+
+  /* Settle whatever is still open WHILE recording is on, so that the settling
+     is itself part of the recording: a pasted picture that was never applied,
+     a label still being typed. */
+  if (_annot) {
+    if (annotMacro.pointerOpen) { _annotUp(); }
+    annotMacroSettleOpenTransform();
+    _annotCommitTextBoxes();
+  }
+
+  annotMacro.recording = false;
+  annotMacro.pointerOpen = false;
+  const entries = annotMacro.entries;
+  annotMacro.entries = [];
+
+  const summary = annotMacroSummarise(entries);
+  if (summary.changeCount === 0) {
+    annotMacroSyncUi();
+    showToast('Nothing was recorded — no mark was made on the page while Record was on.', 'info');
+    return null;
+  }
+
+  annotMacro.last = {
+    entries: entries,
+    start: annotMacro.start,
+    summary: summary,
+    recordedAt: Date.now()
+  };
+  annotMacroSyncUi();
+  annotMacroOpenPicker();
+  return annotMacro.last;
+}
+
+/** Stops recording and forgets what was captured. The marks stay on the page. */
+function annotMacroDiscard() {
+  if (!annotMacro.recording) { return; }
+  annotMacro.recording = false;
+  annotMacro.entries = [];
+  annotMacro.pointerOpen = false;
+  annotMacroSyncUi();
+  showToast('Recording discarded. The marks you made are still on this page.', 'info');
+}
+
+function annotMacroToggle() {
+  if (annotMacro.recording) { annotMacroStop(); } else { annotMacroStart(); }
+}
+
+/* --- 21e. Describing a recording --------------------------------------------- */
+
+/**
+ * Counts what a recording holds, in the order things first happened:
+ *   { items: [{ key, count }], text, changeCount, stepCount, aiCount }
+ * `text` reads "2 erase strokes · 1 text label".
+ */
+function annotMacroSummarise(entries) {
+  const counts = new Map();
+  function count(key) { counts.set(key, (counts.get(key) || 0) + 1); }
+
+  entries.forEach(function (entry) {
+    if (entry.kind === 'down') {
+      if (entry.tool === 'erase' || entry.tool === 'paint' || entry.tool === 'history' ||
+          entry.tool === 'line' || entry.tool === 'fill' || entry.tool === 'move') {
+        count(entry.tool);
+      } else if (entry.tool === 'clone') {
+        if (!entry.setsCloneSource) { count('clone'); }
+      } else if (entry.tool === 'select' || entry.tool === 'lasso' || entry.tool === 'wand') {
+        count('select');
+      }
+      return;
+    }
+    if (entry.kind === 'tool') {
+      /* Picking Rotate, Skew or Resize opens a transform on the spot. */
+      if (entry.tool === 'rotate' || entry.tool === 'skew' || entry.tool === 'scale') { count('transform'); }
+      return;
+    }
+    if (entry.kind === 'call') {
+      if (ANNOT_MACRO_CALL_STEPS[entry.name]) { count(ANNOT_MACRO_CALL_STEPS[entry.name]); }
+      return;
+    }
+    if (entry.kind === 'label' || entry.kind === 'paste' || entry.kind === 'ai') { count(entry.kind); }
+  });
+
+  /* A pasted picture arrives with its resize box open, which is the paste
+     being placed, not a second step. */
+  if (counts.has('paste') && counts.has('transform')) {
+    const remaining = counts.get('transform') - counts.get('paste');
+    if (remaining > 0) { counts.set('transform', remaining); } else { counts.delete('transform'); }
+  }
+
+  const items = [];
+  let changeCount = 0;
+  let stepCount = 0;
+  counts.forEach(function (value, key) {
+    items.push({ key: key, count: value });
+    stepCount += value;
+    if (ANNOT_MACRO_STEP_NAMES[key].changes) { changeCount += value; }
+  });
+
+  const text = items.map(function (item) {
+    const names = ANNOT_MACRO_STEP_NAMES[item.key];
+    return item.count + ' ' + (item.count === 1 ? names.one : names.many);
+  }).join(' · ');
+
+  return {
+    items: items,
+    text: text,
+    changeCount: changeCount,
+    stepCount: stepCount,
+    aiCount: counts.get('ai') || 0
+  };
+}
+
+/** "2–5, 8, 11–12" for a list of page numbers. */
+function describePageRanges(pageNumbers) {
+  const sorted = pageNumbers.slice(0).sort(function (a, b) { return a - b; });
+  const parts = [];
+  let runStart = null;
+  let previous = null;
+
+  sorted.forEach(function (pageNumber) {
+    if (runStart === null) { runStart = pageNumber; previous = pageNumber; return; }
+    if (pageNumber === previous + 1) { previous = pageNumber; return; }
+    parts.push(runStart === previous ? String(runStart) : runStart + '–' + previous);
+    runStart = pageNumber;
+    previous = pageNumber;
+  });
+  if (runStart !== null) { parts.push(runStart === previous ? String(runStart) : runStart + '–' + previous); }
+
+  return parts.join(', ');
+}
+
+/* --- 21f. Sizes, and mapping a position onto a page of another size --------- */
+
+/** The pixel size of the canvas the editor would open a page on, without rendering it. */
+function annotMacroExpectedCanvasSize(pageEntry) {
+  let width;
+  let height;
+
+  if (pageEntry.touchUp) {
+    /* A touched-up page re-opens on its own raster, turned to face the way
+       the page faces now. */
+    const rotation = normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation);
+    const swapsAxes = rotation === 90 || rotation === 270;
+    width = swapsAxes ? pageEntry.touchUp.pixelHeight : pageEntry.touchUp.pixelWidth;
+    height = swapsAxes ? pageEntry.touchUp.pixelWidth : pageEntry.touchUp.pixelHeight;
+  } else {
+    const displayed = displayedPageSize(pageEntry);
+    width = TOUCH_UP_RENDER_WIDTH;
+    height = TOUCH_UP_RENDER_WIDTH * displayed.height / Math.max(1, displayed.width);
+  }
+
+  const cap = Math.min(1, ANNOT_CANVAS_CAP / Math.max(1, width, height));
+  return {
+    width: Math.max(1, Math.round(width * cap)),
+    height: Math.max(1, Math.round(height * cap))
+  };
+}
+
+/**
+ * How recorded positions become positions on a target page whose canvas is
+ * `canvasWidth` pixels across. `scale` multiplies every recorded length;
+ * `exact` means the two rasters have the same pixels per point, so positions
+ * and sizes are used exactly as they were recorded.
+ */
+function annotMacroMapFor(start, canvasWidth, pageEntry) {
+  const displayed = displayedPageSize(pageEntry);
+  const targetPixelsPerPoint = canvasWidth / Math.max(1, displayed.width);
+  const scale = targetPixelsPerPoint / Math.max(1e-6, start.pixelsPerPoint);
+  const exact = Math.abs(scale - 1) <= ANNOT_MACRO_SIZE_SLACK;
+  return { scale: exact ? 1 : scale, exact: exact };
+}
+
+/**
+ * Whether a page is the same paper as the one recorded on: the same size,
+ * facing the same way, and rendered at the same resolution. Only then is
+ * every recorded position — the bottom of the page included — the same place.
+ */
+function annotMacroPageMatchesRecording(pageEntry, start) {
+  const displayed = displayedPageSize(pageEntry);
+  const expected = annotMacroExpectedCanvasSize(pageEntry);
+  const within = function (value, reference) {
+    return Math.abs(value / Math.max(1e-6, reference) - 1) <= ANNOT_MACRO_SIZE_SLACK;
+  };
+  return within(displayed.width, start.pagePointWidth) &&
+    within(displayed.height, start.pagePointHeight) &&
+    annotMacroMapFor(start, expected.width, pageEntry).exact;
+}
+
+function annotMacroMapPoint(point, map) {
+  return point ? { x: point.x * map.scale, y: point.y * map.scale } : null;
+}
+
+/** A selection carried over to a page of another size. */
+function annotMacroMapSelection(selection, map) {
+  if (!selection) { return null; }
+  if (selection.pts) {
+    return { pts: selection.pts.map(function (point) { return annotMacroMapPoint(point, map); }) };
+  }
+  if (map.exact) { return annotMacroCopySelection(selection); }
+
+  /* A wand selection is a mask of pixels, so it is resampled: each pixel of
+     the new mask takes the value of the old pixel it falls on. */
+  const width = Math.max(1, Math.round(selection.w * map.scale));
+  const height = Math.max(1, Math.round(selection.h * map.scale));
+  const mask = new Uint8Array(width * height);
+  for (let row = 0; row < height; row += 1) {
+    const sourceRow = Math.min(selection.h - 1, Math.floor(row / map.scale));
+    for (let column = 0; column < width; column += 1) {
+      const sourceColumn = Math.min(selection.w - 1, Math.floor(column / map.scale));
+      mask[row * width + column] = selection.mask[sourceRow * selection.w + sourceColumn];
+    }
+  }
+  return {
+    x: Math.round(selection.x * map.scale),
+    y: Math.round(selection.y * map.scale),
+    w: width, h: height, mask: mask
+  };
+}
+
+/** A pasted picture brought to the target page's resolution, so it stays the same physical size. */
+async function annotMacroPastedImage(dataUrl, map) {
+  const image = await _loadImageEl(dataUrl);
+  if (map.exact) { return image; }
+  const resized = document.createElement('canvas');
+  resized.width = Math.max(1, Math.round((image.naturalWidth || image.width) * map.scale));
+  resized.height = Math.max(1, Math.round((image.naturalHeight || image.height) * map.scale));
+  const context = resized.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  try { context.imageSmoothingQuality = 'high'; } catch (smoothingError) {}
+  context.drawImage(image, 0, 0, resized.width, resized.height);
+  return _loadImageEl(resized.toDataURL('image/png'));
+}
+
+/* --- 21g. Replaying a recording into the session that is open --------------- */
+
+const ANNOT_MACRO_STATE_INPUTS = ['annotColor', 'annotSize', 'annotTol', 'annotAiPrompt'];
+
+/**
+ * Puts a step's settings in force. The tools re-read colour, size and match
+ * from the toolbar's inputs when a mark begins (_annotSyncControls), so the
+ * inputs are set as well as the session — otherwise the first pointer-down
+ * would overwrite the recorded colour with whatever the picker last showed.
+ */
+function annotMacroInstallState(state, map) {
+  if (!state || !_annot) { return; }
+  const setInput = function (elementId, value) {
+    const element = document.getElementById(elementId);
+    if (element) { element.value = String(value); }
+  };
+  /* On a page of another size the brush keeps its PHYSICAL width. */
+  const brushSize = map.exact ? state.size : Math.max(1, Math.round(state.size * map.scale));
+  setInput('annotColor', state.color);
+  setInput('annotSize', brushSize);
+  setInput('annotTol', state.tol);
+  _annot.color = state.color;
+  _annot.size = brushSize;
+  _annot.tol = state.tol;
+  _annot.eraseTo = state.eraseTo;
+  _annot.text = Object.assign({}, state.text);
+}
+
+/** The stand-in for a pointer event: what the handlers read from one, and no more. */
+function annotMacroPointerEvent(entry, map) {
+  return {
+    preventDefault: function () {},
+    stopPropagation: function () {},
+    button: 0,
+    altKey: !!entry.alt,
+    shiftKey: !!entry.shift,
+    annotMacroPoint: { x: entry.x * map.scale, y: entry.y * map.scale, scale: 1 }
+  };
+}
+
+/**
+ * Feeds every step of `recording` to the editor functions, against whatever
+ * session `_annot` currently is. Resolves to { exact } — whether positions
+ * were used as recorded (true) or scaled to a different-sized page (false).
+ */
+async function annotMacroReplayIntoSession(recording, pageEntry) {
+  const start = recording.start;
+  const map = annotMacroMapFor(start, _annot.canvas.width, pageEntry);
+
+  /* Stand where the recording stood when Record was pressed. The tool is set
+     directly rather than through _annotSetTool, which would open a transform
+     for Rotate / Skew / Resize — the recording opens its own, if it has one. */
+  _annot.tool = start.tool;
+  annotMacroInstallState(start.state, map);
+  _annot.cloneSrc = annotMacroMapPoint(start.cloneSrc, map);
+  _annot.anchor = annotMacroMapPoint(start.anchor, map);
+  _annot.sel = annotMacroMapSelection(start.sel, map);
+
+  for (const entry of recording.entries) {
+    if (!_annot) { break; }
+    if (entry.state) { annotMacroInstallState(entry.state, map); }
+
+    if (entry.kind === 'down') {
+      /* Resize handles are judged "under the pointer" in SCREEN pixels, so the
+         zoom the press was made at is put back first (divided by the map's
+         scale, so the handle's reach covers the same patch of paper). */
+      _annot.fit = (entry.scale || 1) / map.scale;
+      _annot.zoom = 1;
+      _annotDown(annotMacroPointerEvent(entry, map));
+    } else if (entry.kind === 'move') {
+      _annotMove(annotMacroPointerEvent(entry, map));
+    } else if (entry.kind === 'up') {
+      _annotUp();
+    } else if (entry.kind === 'tool') {
+      _annotSetTool(entry.tool);
+    } else if (entry.kind === 'call') {
+      window[entry.name].apply(null, entry.args);
+    } else if (entry.kind === 'label') {
+      const label = Object.assign({}, entry.label, {
+        ax: entry.label.ax * map.scale,
+        ay: entry.label.ay * map.scale,
+        size: entry.label.size * map.scale
+      });
+      /* A web face that has not loaded yet silently draws in its fallback, and
+         a label burned into pixels cannot be re-faced afterwards. */
+      await _annotEnsureFont(label.text, label.size);
+      _annotBurnLabel(label);
+    } else if (entry.kind === 'paste') {
+      _annotPasteImage(await annotMacroPastedImage(entry.dataUrl, map));
+    } else if (entry.kind === 'ai') {
+      const promptField = document.getElementById('annotAiPrompt');
+      if (promptField) { promptField.value = entry.prompt; }
+      await annotAiRegen();
+    }
+  }
+
+  /* Stop settles everything before the recording is kept, so nothing should
+     be open here — but a session must never be stored half-way through. */
+  if (_annot) {
+    annotMacroSettleOpenTransform();
+    _annotResetCompose();
+  }
+
+  return { exact: map.exact };
+}
+
+/** True when two pictures of the same size hold exactly the same pixels. */
+function annotMacroPixelsMatch(before, after) {
+  if (before.width !== after.width || before.height !== after.height) { return false; }
+  /* Four bytes at a time: a page is four and a half million pixels, and this
+     is run once for every page of a batch. */
+  const first = new Uint32Array(before.data.buffer);
+  const second = new Uint32Array(after.data.buffer);
+  for (let index = 0; index < first.length; index += 1) {
+    if (first[index] !== second[index]) { return false; }
+  }
+  return true;
+}
+
+/**
+ * Repeats a recording on one page: renders it as the editor would, builds a
+ * session on canvases nobody sees, replays, and returns what the page should
+ * store — { touchUp, exact, unchanged } — without touching the document.
+ *
+ * `unchanged` means the recording made no difference to this page at all —
+ * rubbing out a header the page does not have, say. Such a page is NOT given
+ * a touch-up: storing a picture identical to the page would only swap its
+ * sharp, selectable text for pixels, and make the exported file bigger, for
+ * nothing anyone could see.
+ */
+async function annotMacroRunOnPage(pageEntry, recording) {
+  const pictureUrl = await renderPageForTouchUp(pageEntry);
+  const picture = await _loadImageEl(pictureUrl);
+
+  _annot = _annotBuildSession(picture, document.createElement('canvas'), document.createElement('canvas'), {
+    pageId: pageEntry.uniqueId,
+    pageRotation: normaliseRotation(pageEntry.basePageRotation + pageEntry.userRotation)
+  });
+
+  try {
+    const before = _annot.ctx.getImageData(0, 0, _annot.canvas.width, _annot.canvas.height);
+    const failuresBefore = annotMacro.aiFailures;
+
+    const report = await annotMacroReplayIntoSession(recording, pageEntry);
+
+    /* A page is repeated on whole or not at all. A Regenerate that came back
+       with nothing would leave the steps around it done and the one in the
+       middle missing, which is not the recording. */
+    if (annotMacro.aiFailures > failuresBefore) {
+      throw new Error('Regenerate came back with nothing for this page.');
+    }
+
+    const after = _annot.ctx.getImageData(0, 0, _annot.canvas.width, _annot.canvas.height);
+    if (annotMacroPixelsMatch(before, after)) {
+      return { touchUp: null, exact: report.exact, unchanged: true };
+    }
+
+    const unrotated = _annotUnrotatedFlat(_annot);
+    return { touchUp: _annotTouchUpFromCanvas(unrotated, pageEntry), exact: report.exact, unchanged: false };
+  } finally {
+    /* The same tidy-up the editor does when it closes: the session is dropped
+       and anything a tool left in the (hidden) stage — the clone-source pin,
+       the brush ring — goes with it. */
+    closeAnnotTool();
+  }
+}
+
+/* --- 21h. The batch: this page, and every page that was ticked -------------- */
+
+/** The toolbar inputs a replay writes to, as they stand, so they can be put back. */
+function annotMacroReadInputs() {
+  const values = { fields: {}, brushMaximum: null };
+  ANNOT_MACRO_STATE_INPUTS.forEach(function (elementId) {
+    const element = document.getElementById(elementId);
+    if (element) { values.fields[elementId] = element.value; }
+  });
+  const brushInput = document.getElementById('annotSize');
+  if (brushInput) {
+    values.brushMaximum = brushInput.max;
+    /* A range input silently clips anything above its maximum, and a brush
+       scaled up for a bigger page can exceed the slider's 60. The ceiling is
+       lifted for the length of the batch and put back afterwards. */
+    brushInput.max = '100000';
+  }
+  return values;
+}
+
+function annotMacroWriteInputs(values) {
+  const brushInput = document.getElementById('annotSize');
+  if (brushInput && values.brushMaximum !== null) { brushInput.max = values.brushMaximum; }
+  Object.keys(values.fields).forEach(function (elementId) {
+    const element = document.getElementById(elementId);
+    if (element) { element.value = values.fields[elementId]; }
+  });
+}
+
+/**
+ * Applies the page that is open in the editor (if one is) and repeats the last
+ * recording on each of `targetPageIds`. Everything is worked out first and
+ * written to the document in one go at the end, behind ONE undo step — so a
+ * failure half-way leaves the document as it was, and a recording that turns
+ * out to be wrong comes off every page with a single Undo.
+ */
+async function annotMacroRepeatOnPages(targetPageIds) {
+  const recording = annotMacro.last;
+  if (!recording || annotMacro.busy || annotMacro.recording) { return; }
+
+  /* Regenerate needs the key before the first page, not half-way down the
+     list — and declining to give one must cancel the batch, not skip the step
+     on every page in silence. */
+  if (recording.summary.aiCount > 0 && !annotAiKey() && !_annotAiAskKey()) {
+    showToast('This recording includes a Regenerate step, which needs a Gemini API key. Nothing was changed.', 'error');
+    return;
+  }
+
+  const pending = [];        // { pageId, touchUp } — written at the very end
+  const failedPages = [];    // page numbers the replay threw on
+  const unchangedPages = []; // page numbers the recording made no difference to
+  const scaledPages = [];    // page numbers whose positions were scaled to fit
+  const inputsBefore = annotMacroReadInputs();
+
+  annotMacro.busy = true;
+  annotMacro.replaying = true;
+  annotMacro.aiFailures = 0;
+  toastMuteDepth += 1;
+  openProgressOverlay('Repeating the recording…');
+
+  try {
+    /* 1. The page open in the editor keeps everything done to it. */
+    if (_annot) {
+      annotMacroSettleOpenTransform();
+      _annotCommitTextBoxes();
+      const openPageId = _annot.pageId;
+      const unrotated = _annotUnrotatedFlat(_annot);
+      closeAnnotTool();
+      const openIndex = findPageIndexById(openPageId);
+      if (openIndex !== -1) {
+        pending.push({ pageId: openPageId, touchUp: _annotTouchUpFromCanvas(unrotated, pageList[openIndex]) });
+      }
+    }
+
+    /* 2. Every ticked page, in document order. */
+    const alreadyDone = new Set(pending.map(function (item) { return item.pageId; }));
+    const targets = targetPageIds
+      .filter(function (pageId) { return findPageIndexById(pageId) !== -1 && !alreadyDone.has(pageId); })
+      .sort(function (a, b) { return findPageIndexById(a) - findPageIndexById(b); });
+
+    for (let position = 0; position < targets.length; position += 1) {
+      const pageIndex = findPageIndexById(targets[position]);
+      if (pageIndex === -1) { continue; }
+
+      getElement('progressLabel').textContent = 'Repeating the recording on page ' + (pageIndex + 1) +
+        ' — ' + (position + 1) + ' of ' + targets.length + '…';
+      updateProgressOverlay(position, targets.length);
+      await waitForMilliseconds(0);          // let the label and the bar paint
+
+      try {
+        const result = await annotMacroRunOnPage(pageList[pageIndex], recording);
+        if (result.unchanged) {
+          unchangedPages.push(pageIndex + 1);
+        } else {
+          pending.push({ pageId: targets[position], touchUp: result.touchUp });
+          if (!result.exact) { scaledPages.push(pageIndex + 1); }
+        }
+      } catch (replayError) {
+        console.error('The recording could not be repeated on page ' + (pageIndex + 1), replayError);
+        failedPages.push(pageIndex + 1);
+        if (_annot) { closeAnnotTool(); }
+      }
+    }
+
+    updateProgressOverlay(targets.length, targets.length);
+  } finally {
+    annotMacroWriteInputs(inputsBefore);
+    annotMacro.replaying = false;
+    annotMacro.busy = false;
+    toastMuteDepth = Math.max(0, toastMuteDepth - 1);
+    closeProgressOverlay();
+  }
+
+  /* 3. Write it all down, as one undoable step. */
+  const changedIds = [];
+  if (pending.length > 0) {
+    pushHistorySnapshot();
+    pending.forEach(function (item) {
+      const pageIndex = findPageIndexById(item.pageId);
+      if (pageIndex === -1) { return; }
+      /* The descriptor is REPLACED, never mutated: the undo stack holds shallow
+         copies of these objects, so editing one in place would rewrite history. */
+      pageList[pageIndex] = Object.assign({}, pageList[pageIndex], { touchUp: item.touchUp });
+      changedIds.push(item.pageId);
+    });
+  }
+
+  /* What happened to the pages that were NOT changed, said once each. */
+  const followUps = [];
+  if (failedPages.length > 0) {
+    followUps.push({
+      variant: 'error',
+      message: 'The recording could not be repeated on page' + (failedPages.length === 1 ? ' ' : 's ') +
+        describePageRanges(failedPages) + ', which ' + (failedPages.length === 1 ? 'was' : 'were') + ' left as before' +
+        (annotMacro.aiFailures > 0 ? ' — Regenerate came back with nothing.' : '.')
+    });
+  }
+  if (unchangedPages.length > 0) {
+    followUps.push({
+      variant: 'info',
+      message: 'Page' + (unchangedPages.length === 1 ? ' ' : 's ') + describePageRanges(unchangedPages) +
+        (unchangedPages.length === 1 ? ' looks' : ' look') + ' exactly the same after the recording, so ' +
+        (unchangedPages.length === 1 ? 'it was' : 'they were') + ' left untouched.'
+    });
+  }
+  if (scaledPages.length > 0) {
+    followUps.push({
+      variant: 'info',
+      message: 'Page' + (scaledPages.length === 1 ? ' ' : 's ') + describePageRanges(scaledPages) +
+        (scaledPages.length === 1 ? ' is' : ' are') + ' a different size, so the marks there were placed the same distance from the top-left corner. Check ' +
+        (scaledPages.length === 1 ? 'it' : 'them') + '.'
+    });
+  }
+  const showFollowUps = function (firstDelay) {
+    followUps.forEach(function (followUp, index) {
+      setTimeout(function () { showToast(followUp.message, followUp.variant); }, firstDelay + 800 * index);
+    });
+  };
+
+  if (changedIds.length === 0) {
+    annotMacroSyncUi();
+    if (followUps.length > 0) {
+      showFollowUps(0);
+    } else {
+      showToast('The recording could not be repeated on any page. Nothing was changed.', 'error');
+    }
+    return;
+  }
+
+  /* The pages that changed are left selected, so it is plain which they were. */
+  selectedPageIds = changedIds.slice(0);
+  lastClickedPageId = changedIds[changedIds.length - 1];
+  renderEverything();
+  annotMacroSyncUi();
+
+  if (currentMode === 'text' && pageList[editorPageIndex] &&
+      changedIds.indexOf(pageList[editorPageIndex].uniqueId) !== -1) {
+    openEditorPage(editorPageIndex);
+  }
+
+  showToast('Touch-up applied to ' + changedIds.length + ' page' + (changedIds.length === 1 ? '' : 's') +
+    '. One Undo takes it off all of them.', 'success');
+  showFollowUps(800);
+}
+
+/* --- 21i. The Record button, its status badge, and the Pages toolbar -------- */
+
+/** Keeps every control that shows the recorder's state in step with it. */
+function annotMacroSyncUi() {
+  const isRecording = annotMacro.recording;
+  const hasRecording = !!annotMacro.last;
+
+  const recordButton = document.getElementById('annotRecordButton');
+  if (recordButton) {
+    recordButton.classList.toggle('is-recording', isRecording);
+    recordButton.setAttribute('aria-pressed', isRecording ? 'true' : 'false');
+    const recordLabel = recordButton.querySelector('.annot-record-label');
+    if (recordLabel) { recordLabel.textContent = isRecording ? 'Stop' : 'Record'; }
+    recordButton.title = isRecording
+      ? 'Stop recording and choose the pages to repeat these marks on.'
+      : 'Record — every mark you make from now on is captured. Press it again to stop, then tick the pages to repeat the marks on, at exactly the same place on each.';
+  }
+
+  const repeatButton = document.getElementById('annotRepeatButton');
+  if (repeatButton) { repeatButton.style.display = (!isRecording && hasRecording) ? '' : 'none'; }
+
+  const discardButton = document.getElementById('annotDiscardButton');
+  if (discardButton) { discardButton.style.display = isRecording ? '' : 'none'; }
+
+  const badge = document.getElementById('annotMacroBadge');
+  if (badge) { badge.style.display = isRecording ? 'inline-flex' : 'none'; }
+
+  const statusText = document.getElementById('annotMacroStatus');
+  if (statusText && isRecording) {
+    const summary = annotMacroSummarise(annotMacro.entries);
+    statusText.textContent = summary.stepCount === 0
+      ? 'Recording — make your marks'
+      : 'Recording — ' + summary.text;
+    /* The badge is one line and cuts a long list short; the whole of it is
+       still there on hover of the Stop button. */
+    if (recordButton && summary.stepCount > 0) {
+      recordButton.title = 'Stop recording and choose the pages to repeat these marks on. So far: ' + summary.text + '.';
+    }
+  }
+
+  /* The Pages toolbar's Repeat button: there once a recording exists, so it
+     can be put on more pages later without opening the editor again. */
+  const pagesButton = document.getElementById('repeatRecordingButton');
+  if (pagesButton) {
+    pagesButton.disabled = !hasRecording || pageList.length === 0;
+    pagesButton.title = hasRecording
+      ? 'Repeat the last recorded touch-up (' + annotMacro.last.summary.text + ') on other pages'
+      : 'Repeat a recorded touch-up on other pages. Record one first: double-click a page, press Record in the Touch-up editor, make your marks, then Stop.';
+  }
+}
+
+/* --- 21j. The page picker ---------------------------------------------------- */
+
+const annotMacroPicker = {
+  ticked: new Set(),     // page ids the recording will be repeated on
+  anchorId: null,        // the last tile clicked, for Shift-click ranges
+  lockedPageId: null     // the page open in the editor: it is applied, not replayed
+};
+
+function annotMacroPickerIsOpen() {
+  const modal = document.getElementById('macroPagesModal');
+  return !!modal && modal.classList.contains('is-open');
+}
+
+/** Parses "1-4, 9, 12-14" into page numbers that exist, in the order typed. */
+function parsePageRangeText(rangeText) {
+  const pageNumbers = [];
+  String(rangeText || '').split(',').forEach(function (segment) {
+    const cleanSegment = segment.trim();
+    if (cleanSegment.length === 0) { return; }
+
+    const rangeMatch = cleanSegment.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    const singleMatch = cleanSegment.match(/^(\d+)$/);
+
+    if (rangeMatch) {
+      const lowerBound = Math.min(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
+      const upperBound = Math.max(parseInt(rangeMatch[1], 10), parseInt(rangeMatch[2], 10));
+      for (let position = lowerBound; position <= upperBound && position <= pageList.length; position += 1) {
+        if (position >= 1) { pageNumbers.push(position); }
+      }
+    } else if (singleMatch) {
+      const position = parseInt(singleMatch[1], 10);
+      if (position >= 1 && position <= pageList.length) { pageNumbers.push(position); }
+    }
+  });
+  return pageNumbers;
+}
+
+/** Page ids that can be ticked: every page but the one open in the editor. */
+function annotMacroTickablePageIds() {
+  return pageList
+    .map(function (pageEntry) { return pageEntry.uniqueId; })
+    .filter(function (pageId) { return pageId !== annotMacroPicker.lockedPageId; });
+}
+
+/**
+ * Opens the picker for the last recording. With the editor open, the page in
+ * it is shown ticked and locked — it keeps its own marks whatever else is
+ * chosen. From the Pages toolbar there is no such page and any can be ticked.
+ */
+function annotMacroOpenPicker() {
+  const recording = annotMacro.last;
+  if (!recording) {
+    showToast('There is no recording yet. Open a page in Touch up, press Record, make your marks, then Stop.', 'info');
+    return;
+  }
+  if (annotMacro.recording || annotMacro.busy) { return; }
+  if (pageList.length === 0) {
+    showToast('There are no pages to repeat the recording on.', 'info');
+    return;
+  }
+
+  annotMacroPicker.lockedPageId = _annot ? _annot.pageId : null;
+  annotMacroPicker.anchorId = null;
+  /* Nothing starts ticked — not even the pages selected in the grid. Importing
+     a file leaves every one of its pages selected, and a batch leaves the pages
+     it changed selected, so "what is selected" is very often not a choice
+     anybody made; and this dialog changes every page it is told to. The pages
+     are chosen here, on purpose, each time. */
+  annotMacroPicker.ticked = new Set();
+
+  getElement('macroRangeInput').value = '';
+  annotMacroRenderPicker();
+  getElement('macroPagesModal').classList.add('is-open');
+}
+
+function annotMacroClosePicker() {
+  getElement('macroPagesModal').classList.remove('is-open');
+}
+
+/** Builds one tile per page. Run once per opening; ticking only restyles. */
+function annotMacroRenderPicker() {
+  const recording = annotMacro.last;
+  const grid = getElement('macroPagesGrid');
+  grid.innerHTML = '';
+
+  const fragment = document.createDocumentFragment();
+
+  pageList.forEach(function (pageEntry, pageIndex) {
+    const isLocked = pageEntry.uniqueId === annotMacroPicker.lockedPageId;
+    const sameSize = annotMacroPageMatchesRecording(pageEntry, recording.start);
+
+    const tile = document.createElement('div');
+    tile.className = 'macro-tile' + (isLocked ? ' is-locked' : '');
+    tile.setAttribute('data-uid', pageEntry.uniqueId);
+    tile.setAttribute('role', 'checkbox');
+    tile.setAttribute('tabindex', isLocked ? '-1' : '0');
+    tile.setAttribute('aria-label', 'Page ' + (pageIndex + 1));
+    if (isLocked) { tile.setAttribute('aria-disabled', 'true'); }
+
+    const check = document.createElement('span');
+    check.className = 'macro-tile-check';
+    check.textContent = '✓';
+    tile.appendChild(check);
+
+    tile.appendChild(buildThumbnailFrameForPage(pageEntry, pageIndex));
+
+    const meta = document.createElement('div');
+    meta.className = 'macro-tile-meta';
+
+    const pageNumber = document.createElement('span');
+    pageNumber.className = 'page-number';
+    pageNumber.textContent = String(pageIndex + 1);
+    meta.appendChild(pageNumber);
+
+    /* One tag at most, the most useful first: where this page stands in
+       relation to the recording. */
+    let tagText = '';
+    let tagTitle = '';
+    let tagClass = '';
+    if (isLocked) {
+      tagText = 'this page';
+      tagTitle = 'The page open in the editor. It keeps everything you did to it, recorded or not.';
+      tagClass = ' is-source';
+    } else if (pageEntry.uniqueId === recording.start.pageId) {
+      tagText = 'recorded here';
+      tagTitle = 'The recording was made on this page.';
+      tagClass = ' is-source';
+    } else if (!sameSize) {
+      tagText = 'other size';
+      tagTitle = 'This page is a different size or shape from the one the recording was made on, so there is no "same pixel". ' +
+        'The marks will be placed the same distance from its top-left corner, at the same physical size — check the result, or leave this page out.';
+      tagClass = ' is-warning';
+    } else if (pageEntry.touchUp) {
+      tagText = 'touched up';
+      tagTitle = 'This page already has a touch-up. The recording is added on top of it.';
+    }
+    if (tagText) {
+      const tag = document.createElement('span');
+      tag.className = 'macro-tile-tag' + tagClass;
+      tag.textContent = tagText;
+      tag.title = tagTitle;
+      meta.appendChild(tag);
+    }
+    tile.setAttribute('data-same-size', sameSize ? 'yes' : 'no');
+
+    tile.appendChild(meta);
+    fragment.appendChild(tile);
+  });
+
+  grid.appendChild(fragment);
+  annotMacroSyncPicker();
+}
+
+/** Restyles the tiles and rewrites every line that depends on what is ticked. */
+function annotMacroSyncPicker() {
+  const recording = annotMacro.last;
+  if (!recording) { return; }
+
+  const editorIsOpen = annotMacroPicker.lockedPageId !== null;
+  let scaledCount = 0;
+  const tickedNumbers = [];
+
+  getElement('macroPagesGrid').querySelectorAll('.macro-tile').forEach(function (tile) {
+    const pageId = tile.getAttribute('data-uid');
+    const isLocked = pageId === annotMacroPicker.lockedPageId;
+    const isTicked = isLocked || annotMacroPicker.ticked.has(pageId);
+    tile.classList.toggle('is-ticked', isTicked);
+    tile.setAttribute('aria-checked', isTicked ? 'true' : 'false');
+    if (!isLocked && isTicked) {
+      tickedNumbers.push(findPageIndexById(pageId) + 1);
+      if (tile.getAttribute('data-same-size') === 'no') { scaledCount += 1; }
+    }
+  });
+
+  const tickedCount = tickedNumbers.length;
+  const sourceIndex = findPageIndexById(recording.start.pageId);
+
+  /* What was recorded, and where. */
+  getElement('macroSummaryText').textContent =
+    (sourceIndex === -1 ? 'Recorded: ' : 'Recorded on page ' + (sourceIndex + 1) + ': ') + recording.summary.text + '.';
+
+  /* What ticking pages will do. */
+  const lockedIndex = findPageIndexById(annotMacroPicker.lockedPageId);
+  let statusLine;
+  if (tickedCount === 0) {
+    statusLine = editorIsOpen
+      ? 'Tick the pages to repeat it on. Page ' + (lockedIndex + 1) + ', open in the editor, keeps its marks either way.'
+      : 'Tick the pages to repeat it on.';
+  } else {
+    statusLine = 'It will be repeated on ' + tickedCount + ' page' + (tickedCount === 1 ? '' : 's') +
+      ' (' + describePageRanges(tickedNumbers) + ')' +
+      (editorIsOpen ? ', and page ' + (lockedIndex + 1) + ' keeps its marks.' : '.');
+  }
+  getElement('macroStatusText').textContent = statusLine;
+
+  /* Things worth knowing before pressing the button. */
+  const notes = [];
+  if (scaledCount > 0) {
+    notes.push(scaledCount + ' ticked page' + (scaledCount === 1 ? ' is' : 's are') +
+      ' a different size from the recorded page. The marks there are placed the same distance from the top-left corner, at the same physical size, which may not be where that page needs them.');
+  }
+  if (recording.summary.aiCount > 0 && tickedCount > 0) {
+    notes.push('This recording includes Regenerate, which is run again for each page: a picture of every ticked page ' +
+      'will be sent to Google\'s Gemini model.');
+  }
+  const noteElement = getElement('macroNoteText');
+  noteElement.textContent = notes.join(' ');
+  noteElement.style.display = notes.length > 0 ? 'block' : 'none';
+
+  const confirmButton = getElement('macroConfirmButton');
+  confirmButton.disabled = tickedCount === 0;
+  confirmButton.textContent = tickedCount === 0
+    ? 'Repeat on pages'
+    : 'Repeat on ' + tickedCount + ' page' + (tickedCount === 1 ? '' : 's');
+
+  getElement('macroCancelButton').textContent = editorIsOpen ? 'Back to editing' : 'Cancel';
+  getElement('macroOnlyThisButton').style.display = editorIsOpen ? '' : 'none';
+}
+
+function annotMacroSetTicked(pageIds, replaceExisting) {
+  const tickable = new Set(annotMacroTickablePageIds());
+  if (replaceExisting) { annotMacroPicker.ticked = new Set(); }
+  pageIds.forEach(function (pageId) {
+    if (tickable.has(pageId)) { annotMacroPicker.ticked.add(pageId); }
+  });
+  annotMacroSyncPicker();
+}
+
+/** A click on a tile: toggle it, or with Shift tick the whole run back to the last one clicked. */
+function annotMacroHandleTileClick(pageId, withShift) {
+  if (pageId === annotMacroPicker.lockedPageId) { return; }
+
+  const anchorIndex = findPageIndexById(annotMacroPicker.anchorId);
+  const clickedIndex = findPageIndexById(pageId);
+
+  if (withShift && anchorIndex !== -1 && clickedIndex !== -1) {
+    const from = Math.min(anchorIndex, clickedIndex);
+    const to = Math.max(anchorIndex, clickedIndex);
+    const runIds = [];
+    for (let index = from; index <= to; index += 1) { runIds.push(pageList[index].uniqueId); }
+    annotMacroSetTicked(runIds, false);
+  } else {
+    if (annotMacroPicker.ticked.has(pageId)) {
+      annotMacroPicker.ticked.delete(pageId);
+    } else {
+      annotMacroPicker.ticked.add(pageId);
+    }
+    annotMacroSyncPicker();
+  }
+
+  annotMacroPicker.anchorId = pageId;
+}
+
+function annotMacroTickByParity(wantOddPositions) {
+  const matching = [];
+  pageList.forEach(function (pageEntry, index) {
+    if (((index + 1) % 2 === 1) === wantOddPositions) { matching.push(pageEntry.uniqueId); }
+  });
+  annotMacroSetTicked(matching, true);
+}
+
+function annotMacroTickInverse() {
+  const inverse = annotMacroTickablePageIds().filter(function (pageId) {
+    return !annotMacroPicker.ticked.has(pageId);
+  });
+  annotMacroSetTicked(inverse, true);
+}
+
+function annotMacroTickRange() {
+  const pageNumbers = parsePageRangeText(getElement('macroRangeInput').value);
+  if (pageNumbers.length === 0) {
+    showToast('Type something like 2-10, 14 to tick those pages.', 'error');
+    return;
+  }
+  annotMacroSetTicked(pageNumbers.map(function (pageNumber) { return pageList[pageNumber - 1].uniqueId; }), true);
+}
+
+/** The main button: close the picker and run the batch on what is ticked. */
+function annotMacroConfirmPicker() {
+  const targetIds = pageList
+    .map(function (pageEntry) { return pageEntry.uniqueId; })
+    .filter(function (pageId) { return annotMacroPicker.ticked.has(pageId); });
+  if (targetIds.length === 0) { return; }
+
+  annotMacroClosePicker();
+  annotMacroRepeatOnPages(targetIds);
+}
+
+/** "Apply to this page only": the plain Apply, with the recording kept for later. */
+function annotMacroApplyOnlyThisPage() {
+  annotMacroClosePicker();
+  if (_annot) { annotMacroOriginals.applyAnnotTool(); }
+}
+
+function wireAnnotMacro() {
+  getElement('repeatRecordingButton').addEventListener('click', annotMacroOpenPicker);
+
+  getElement('macroPagesCloseButton').addEventListener('click', annotMacroClosePicker);
+  getElement('macroCancelButton').addEventListener('click', annotMacroClosePicker);
+  getElement('macroOnlyThisButton').addEventListener('click', annotMacroApplyOnlyThisPage);
+  getElement('macroConfirmButton').addEventListener('click', annotMacroConfirmPicker);
+
+  getElement('macroPagesModal').addEventListener('click', function (clickEvent) {
+    if (clickEvent.target === getElement('macroPagesModal')) { annotMacroClosePicker(); }
+  });
+
+  getElement('macroTickAllButton').addEventListener('click', function () {
+    annotMacroSetTicked(annotMacroTickablePageIds(), true);
+  });
+  getElement('macroTickNoneButton').addEventListener('click', function () { annotMacroSetTicked([], true); });
+  getElement('macroTickInvertButton').addEventListener('click', annotMacroTickInverse);
+  getElement('macroTickOddButton').addEventListener('click', function () { annotMacroTickByParity(true); });
+  getElement('macroTickEvenButton').addEventListener('click', function () { annotMacroTickByParity(false); });
+  getElement('macroTickRangeButton').addEventListener('click', annotMacroTickRange);
+
+  getElement('macroRangeInput').addEventListener('keydown', function (keyEvent) {
+    if (keyEvent.key === 'Enter') {
+      keyEvent.preventDefault();
+      annotMacroTickRange();
+    }
+  });
+
+  const grid = getElement('macroPagesGrid');
+  grid.addEventListener('click', function (clickEvent) {
+    const tile = clickEvent.target.closest('.macro-tile');
+    if (!tile) { return; }
+    annotMacroHandleTileClick(tile.getAttribute('data-uid'), clickEvent.shiftKey);
+  });
+  /* Space or Enter on a focused tile ticks it, as on any checkbox. */
+  grid.addEventListener('keydown', function (keyEvent) {
+    if (keyEvent.key !== ' ' && keyEvent.key !== 'Enter') { return; }
+    const tile = keyEvent.target.closest('.macro-tile');
+    if (!tile) { return; }
+    keyEvent.preventDefault();
+    annotMacroHandleTileClick(tile.getAttribute('data-uid'), keyEvent.shiftKey);
+  });
+
+  annotMacroSyncUi();
+}
+
+/* Wrapped as the script loads, before the editor can be opened for the first
+   time — the keyboard listener in particular is bound by reference when the
+   editor opens, so it has to be the wrapped one by then. */
+annotMacroInstallHooks();
+
+/* ==========================================================================
+   22. KEYBOARD SHORTCUTS
    ========================================================================== */
 
 function isTypingIntoField(eventTarget) {
@@ -12535,7 +14396,7 @@ function handleGlobalKeyDown(keyEvent) {
      close — so the app's shortcuts must stay out of its way entirely. Escape in
      particular: closeTopmostModal() below would shut the editor outright and
      throw away everything drawn in it. */
-  if (_annot) { return; }
+  if (_annot || annotMacro.busy) { return; }
 
   const previewIsOpen = getElement('previewModal').classList.contains('is-open');
 
@@ -12630,7 +14491,7 @@ function handleGlobalKeyDown(keyEvent) {
 }
 
 /* ==========================================================================
-   22. EVENT WIRING AND BOOT
+   23. EVENT WIRING AND BOOT
    ========================================================================== */
 
 function openFindReplaceDialog() {
@@ -12727,10 +14588,22 @@ function wireGridInteractions() {
     handleCardClick(uniqueId, clickEvent);
   });
 
+  /* Double-clicking a page opens it in the Touch-up editor — the thing a page
+     is most often opened FOR. (The large preview is still on the card's eye
+     button.) Two quick presses on one of the card's own buttons are two
+     presses of that button, not a request to open the editor, so they are
+     left alone. The two clicks that make up a double-click toggle the card's
+     selection on and then off again, so the page is re-selected here: the
+     page being worked on should be the one that is highlighted behind it. */
   pageGrid.addEventListener('dblclick', function (clickEvent) {
     const cardElement = clickEvent.target.closest('.page-card');
     if (!cardElement) { return; }
-    openPreviewAtIndex(findPageIndexById(cardElement.getAttribute('data-uid')));
+    if (clickEvent.target.closest('.card-action-button')) { return; }
+
+    const uniqueId = cardElement.getAttribute('data-uid');
+    setSelection([uniqueId]);
+    lastClickedPageId = uniqueId;
+    openTouchUpForPage(uniqueId);
   });
 
   attachGridDragHandlers();
@@ -12987,6 +14860,7 @@ function bootApplication() {
   wireExportControls();
   wireModals();
   wireCoverPageDialog();
+  wireAnnotMacro();
   wireModeSwitch();
   wireWindowGuards();
 
