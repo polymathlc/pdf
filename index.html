@@ -7,7 +7,7 @@
 
 <!--
   ============================================================================
-  POLYMATH PDF STUDIO  v2.4.0
+  POLYMATH PDF STUDIO  v2.5.0
   ----------------------------------------------------------------------------
   A client-side PDF editor. Every byte of every PDF stays inside this browser
   tab; nothing is uploaded to a server, and there is no server of ours to
@@ -29,6 +29,14 @@
       point — in any quantity, at a chosen paper size and orientation, or
       matching whatever page they sit next to — and a document can be started
       from a blank page with no import at all.
+
+      Page numbers can be stamped on at export. Numbering BEGINS ON PAGE 3 by
+      default, because page 1 is the front page and page 2 is the back of it
+      and neither wants a number — the first page of real content is then
+      stamped 1, which is how the Science and Maths portals print a worksheet
+      with a cover. Which page the numbering begins on, and what number that
+      page carries, are both settable beside the stamp checkbox, and a line
+      underneath says in words which pages will get which numbers.
 
   COVER PAGE  — the Big M cover from the Science and Maths portals
       The Cover button (Shift+C) adds the cover the two portals print — the
@@ -1177,6 +1185,24 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   border: 1px solid var(--border-subtle);
   animation: fadeIn 0.25s ease both;
 }
+
+/* The sentence under the stamp controls. It takes the whole width of the
+   panel so it reads as one line about all of them, not as a fifth field. */
+.stamp-summary {
+  flex: 1 1 100%;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.stamp-summary strong { color: var(--text-primary); font-weight: 700; }
+
+/* Settings that would number nothing at all are worth a different colour:
+   the export would succeed and quietly come out with no numbers on it. */
+.stamp-summary.is-warning { color: #A33A3A; }
+.stamp-summary.is-warning strong { color: #A33A3A; }
 
 .action-row {
   display: flex;
@@ -2713,7 +2739,23 @@ kbd {
       Stamp page numbers onto the exported pages
     </label>
 
+    <!-- Numbering begins on page 3 unless told otherwise: page 1 is the front
+         page and page 2 is the back of it, and neither wants a number. That is
+         also how the Science and Maths portals print a worksheet with a cover —
+         the cover and the blank sheet behind it are skipped and the first page
+         of questions is page 1. Both halves of that are settable: WHICH PAGE
+         the numbering begins on, and WHAT NUMBER that page carries. -->
     <div class="stamp-options" id="stampOptions" style="display: none;">
+      <div class="field">
+        <label for="stampFirstPageInput">Begin on page</label>
+        <input type="number" id="stampFirstPageInput" value="3" min="1" step="1" inputmode="numeric" style="width: 104px;"
+               title="The first page of the document that gets a number. Every page before it is left without one — by default pages 1 and 2, the front page and the back of it. Set it to 1 to number every page." />
+      </div>
+      <div class="field">
+        <label for="stampStartInput">First number</label>
+        <input type="number" id="stampStartInput" value="1" min="0" step="1" inputmode="numeric" style="width: 104px;"
+               title="The number printed on the page the numbering begins on. The pages after it count up from here. Leave it at 1 for the first numbered page to be page 1, or set it to match “Begin on page” if the front pages should still be counted." />
+      </div>
       <div class="field">
         <label for="stampPositionSelect">Position</label>
         <select id="stampPositionSelect">
@@ -2724,10 +2766,6 @@ kbd {
           <option value="top-right">Top right</option>
           <option value="top-left">Top left</option>
         </select>
-      </div>
-      <div class="field">
-        <label for="stampStartInput">Start at</label>
-        <input type="number" id="stampStartInput" value="1" min="0" step="1" style="width: 92px;" />
       </div>
       <div class="field">
         <label for="stampSizeInput">Font size</label>
@@ -2742,6 +2780,12 @@ kbd {
           <option value="pageof">Page 1 of 20</option>
         </select>
       </div>
+
+      <!-- What the settings above will actually do to THIS document, in words:
+           which pages are skipped, what the first numbered page says and what
+           the last one says. Rewritten whenever a setting or the page count
+           changes, so nothing has to be exported to find out. -->
+      <div class="stamp-summary" id="stampSummary" aria-live="polite"></div>
     </div>
 
     <div class="action-row">
@@ -3497,11 +3541,11 @@ kbd {
   <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
 </div>
 
-<div class="version-badge">Polymath PDF Studio v2.4.0</div>
+<div class="version-badge">Polymath PDF Studio v2.5.0</div>
 
 <script>
 /* ==========================================================================
-   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.4.0
+   POLYMATH PDF STUDIO — APPLICATION SCRIPT  v2.5.0
    ==========================================================================
    Deliberately verbose and unminified so it stays easy to read and extend.
 
@@ -5245,6 +5289,9 @@ function renderEverything() {
   updateStatusBar();
   updateToolbarAvailability();
   updateLayoutVisibility();
+  /* Adding, deleting or reordering pages changes which page is "page 3" and
+     which is the last, so the sentence about page numbers follows them. */
+  updateStampSummary();
 }
 
 /* --------------------------------------------------------------------------
@@ -7089,6 +7136,195 @@ function formatStampText(formatKey, currentNumber, totalCount) {
   return String(currentNumber);
 }
 
+/* --------------------------------------------------------------------------
+   WHICH PAGES GET A NUMBER, AND WHICH NUMBER
+
+   Two settings decide it:
+
+     stampFirstPage    the first page of the DOCUMENT that is numbered. Every
+                       page before it is left alone. The default is 3: page 1
+                       is the front page and page 2 is the back of it, and a
+                       cover with "1" at its foot looks wrong. (The Science
+                       and Maths portals print the same way — the cover and
+                       the blank sheet behind it carry no number.)
+     stampStartNumber  the number that first numbered page carries. The
+                       default is 1, so the first page of real content is
+                       page 1 — again as the portals have it. Set it to 3 and
+                       the front pages are counted but not shown.
+
+   "Page 3" means page 3 of the document AS ARRANGED IN THE GRID, not page 3
+   of whatever file is being written. That matters for the two exports that
+   write only part of the document:
+
+     Export selection only   a selected page is skipped only if it is one of
+                             the document's front pages. Selecting pages 5–10
+                             numbers all six of them; it does not leave 5 and
+                             6 bare because they happen to come first in the
+                             file.
+     Split into chunks       the same: only the first file contains the front
+                             pages, so only the first file has bare pages.
+
+   Within one file the numbers always run from stampStartNumber without gaps,
+   as they did before, so each exported file reads as its own numbered thing.
+
+   The "of N" formats need a total. It is the LAST NUMBER PRINTED in the file,
+   which is the only total that is true under both conventions: eighteen
+   numbered pages from 1 end "18 of 18", and the same pages from 3 end
+   "20 of 20".
+   -------------------------------------------------------------------------- */
+const DEFAULT_STAMP_FIRST_PAGE = 3;
+const DEFAULT_STAMP_FIRST_NUMBER = 1;
+
+/**
+ * Works out the stamp for every page of a file about to be built.
+ *
+ * Returns:
+ *   {
+ *     stamps:        one entry per page of the file, in order — null for a
+ *                    page that gets no number, or { number, total }
+ *     stampedCount:  how many pages get a number
+ *     skippedCount:  how many are left without one
+ *     firstNumber:   the first number printed (null when none is)
+ *     lastNumber:    the last number printed  (null when none is)
+ *     firstPage:     the document page numbering begins on, as used
+ *   }
+ */
+function planPageNumberStamps(pagesToBuild, settings) {
+  const options = settings || {};
+
+  /* Left out altogether (a caller that predates the setting) means "number
+     every page", which is what stamping always did. */
+  const firstPage = Number.isFinite(options.stampFirstPage)
+    ? Math.max(1, Math.floor(options.stampFirstPage))
+    : 1;
+  const startNumber = Number.isFinite(options.stampStartNumber)
+    ? Math.floor(options.stampStartNumber)
+    : DEFAULT_STAMP_FIRST_NUMBER;
+
+  const stamps = pagesToBuild.map(function () { return null; });
+  const stampedIndexes = [];
+
+  pagesToBuild.forEach(function (pageEntry, fileIndex) {
+    /* Where the page sits in the document. A page that is not in the document
+       at all (there should be none) falls back to its place in the file. */
+    const documentIndex = pageEntry ? findPageIndexById(pageEntry.uniqueId) : -1;
+    const documentPosition = documentIndex === -1 ? fileIndex + 1 : documentIndex + 1;
+    if (documentPosition >= firstPage) { stampedIndexes.push(fileIndex); }
+  });
+
+  const stampedCount = stampedIndexes.length;
+  const lastNumber = stampedCount > 0 ? startNumber + stampedCount - 1 : null;
+
+  stampedIndexes.forEach(function (fileIndex, order) {
+    stamps[fileIndex] = { number: startNumber + order, total: lastNumber };
+  });
+
+  return {
+    stamps: stamps,
+    stampedCount: stampedCount,
+    skippedCount: pagesToBuild.length - stampedCount,
+    firstNumber: stampedCount > 0 ? startNumber : null,
+    lastNumber: lastNumber,
+    firstPage: firstPage
+  };
+}
+
+/** A whole number from a field, or the fallback when the field holds none. */
+function readWholeNumberField(elementId, fallbackValue, minimumValue) {
+  const parsedValue = parseInt(getElement(elementId).value, 10);
+  if (!Number.isFinite(parsedValue)) { return fallbackValue; }
+  return Math.max(minimumValue, parsedValue);
+}
+
+/**
+ * The sentence shown under the stamp controls: what the current settings will
+ * do to the whole document. Returns { html, isWarning }. Every value that goes
+ * into the HTML is a number or one of the four fixed formats, so there is
+ * nothing in it to escape.
+ */
+function describeStampPlanForDocument() {
+  const settings = collectExportSettings();
+  const pageCount = pageList.length;
+  const firstPage = settings.stampFirstPage;
+  const quoted = function (number, total) {
+    return '<strong>“' + formatStampText(settings.stampFormat, number, total) + '”</strong>';
+  };
+
+  if (pageCount === 0) {
+    return { html: 'Add some pages and this line will say which of them get a number.', isWarning: false };
+  }
+
+  if (firstPage > pageCount) {
+    return {
+      html: '<strong>Nothing would be numbered.</strong> Numbering is set to begin on page ' + firstPage +
+        ', and this document has only ' + pageCount + ' page' + (pageCount === 1 ? '' : 's') +
+        '. Lower “Begin on page”.',
+      isWarning: true
+    };
+  }
+
+  const plan = planPageNumberStamps(pageList, settings);
+  const parts = [];
+
+  if (firstPage === 1) {
+    parts.push('Every page gets a number.');
+  } else if (firstPage === 2) {
+    parts.push('<strong>Page 1</strong> — the front page — gets no number.');
+  } else if (firstPage === 3) {
+    parts.push('<strong>Pages 1 and 2</strong> — the front page and the back of it — get no number.');
+  } else {
+    parts.push('<strong>Pages 1–' + (firstPage - 1) + '</strong> get no number.');
+  }
+
+  parts.push('Page ' + firstPage + ' is stamped ' + quoted(plan.firstNumber, plan.lastNumber) +
+    (pageCount > firstPage
+      ? ', and the numbers run on to ' + quoted(plan.lastNumber, plan.lastNumber) + ' on page ' + pageCount + ', the last.'
+      : '.'));
+
+  if (firstPage > 1) {
+    parts.push('Exporting a selection or splitting skips only these front pages, wherever they fall in the file.');
+  }
+
+  return { html: parts.join(' '), isWarning: false };
+}
+
+/** Rewrites the sentence under the stamp controls. Cheap, so it is simply
+    called whenever a stamp setting or the page list changes. */
+function updateStampSummary() {
+  const summaryElement = document.getElementById('stampSummary');
+  if (!summaryElement) { return; }
+  if (!getElement('stampToggle').checked) { return; }
+
+  const description = describeStampPlanForDocument();
+  summaryElement.innerHTML = description.html;
+  summaryElement.classList.toggle('is-warning', description.isWarning);
+}
+
+/**
+ * What to say about the numbering once a file has been written: appended to
+ * the "Exported …" toast. Empty when stamping is off.
+ */
+function describeStampOutcome(pagesBuilt, settings) {
+  if (!settings.stampPageNumbers) { return { text: '', nothingStamped: false }; }
+
+  const plan = planPageNumberStamps(pagesBuilt, settings);
+  if (plan.stampedCount === 0) {
+    return {
+      text: 'No page was numbered: numbering begins on page ' + plan.firstPage +
+        ' of the document, and none of these pages comes that late. Lower “Begin on page” to number them.',
+      nothingStamped: true
+    };
+  }
+
+  const numbered = plan.stampedCount === 1
+    ? '1 page numbered ' + plan.firstNumber
+    : plan.stampedCount + ' pages numbered ' + plan.firstNumber + '–' + plan.lastNumber;
+  const bare = plan.skippedCount === 0
+    ? ''
+    : ', ' + plan.skippedCount + ' front page' + (plan.skippedCount === 1 ? '' : 's') + ' left without a number';
+  return { text: ' ' + numbered + bare + '.', nothingStamped: false };
+}
+
 /** Builds a brand new PDF from the supplied page descriptors. */
 async function buildPdfBytes(pagesToBuild, options) {
   const settings = options || {};
@@ -7181,15 +7417,22 @@ async function buildPdfBytes(pagesToBuild, options) {
     await applyTextEditsToOutputPage(outputDocument, outputPage, pageEdits, fontCache);
   }
 
-  /* --- Stage three: optional page-number stamping --- */
+  /* --- Stage three: optional page-number stamping ---
+     Which pages are numbered, and with what, is decided in ONE place
+     (planPageNumberStamps) — the same function the line under the stamp
+     controls and the after-export message read — so what was promised on
+     screen is what is drawn here. */
   if (settings.stampPageNumbers) {
     const helveticaFont = await getEmbeddedStandardFont(outputDocument, fontCache, 'Helvetica');
     const finalPages = outputDocument.getPages();
     const fontSize = settings.stampFontSize;
+    const stampPlan = planPageNumberStamps(pagesToBuild, settings);
 
     finalPages.forEach(function (outputPage, pageIndex) {
-      const stampNumber = settings.stampStartNumber + pageIndex;
-      const stampText = formatStampText(settings.stampFormat, stampNumber, finalPages.length);
+      const stamp = stampPlan.stamps[pageIndex];
+      if (!stamp) { return; }                 // a front page: left without a number
+
+      const stampText = formatStampText(settings.stampFormat, stamp.number, stamp.total);
       const pageSize = outputPage.getSize();
       const textWidth = helveticaFont.widthOfTextAtSize(stampText, fontSize);
       const coordinates = computeStampCoordinates(
@@ -7220,7 +7463,11 @@ function collectExportSettings() {
     documentTitle: getElement('documentTitleInput').value.trim(),
     stampPageNumbers: getElement('stampToggle').checked,
     stampPosition: getElement('stampPositionSelect').value,
-    stampStartNumber: parseInt(getElement('stampStartInput').value, 10) || 1,
+    /* An empty box means "the usual": begin on page 3, numbered from 1. */
+    stampFirstPage: readWholeNumberField('stampFirstPageInput', DEFAULT_STAMP_FIRST_PAGE, 1),
+    /* Read as a number rather than with `|| 1`, which turned a deliberate 0
+       (a paper whose cover is "page 0") back into 1. */
+    stampStartNumber: readWholeNumberField('stampStartInput', DEFAULT_STAMP_FIRST_NUMBER, 0),
     stampFontSize: parseInt(getElement('stampSizeInput').value, 10) || 10,
     stampFormat: getElement('stampFormatSelect').value
   };
@@ -7256,7 +7503,16 @@ async function downloadDocument(pagesToBuild, fileNameSuffix) {
 
     triggerBlobDownload(pdfBytes, fullName);
     closeProgressOverlay();
-    showToast('Exported ' + pagesToBuild.length + ' pages · ' + formatByteSize(pdfBytes.length) + '.', 'success');
+
+    /* Say what the numbering did, not only that a file was made: "18 pages
+       numbered 1–18, 2 front pages left without a number" is how somebody
+       finds out the setting was right without opening the PDF to look. */
+    const stampOutcome = describeStampOutcome(pagesToBuild, settings);
+    showToast('Exported ' + pagesToBuild.length + ' page' + (pagesToBuild.length === 1 ? '' : 's') +
+      ' · ' + formatByteSize(pdfBytes.length) + '.' + (stampOutcome.nothingStamped ? '' : stampOutcome.text), 'success');
+    if (stampOutcome.nothingStamped) {
+      setTimeout(function () { showToast(stampOutcome.text, 'error'); }, 700);
+    }
   } catch (exportError) {
     console.error(exportError);
     closeProgressOverlay();
@@ -7313,7 +7569,18 @@ async function splitIntoChunks() {
     }
 
     closeProgressOverlay();
-    showToast('Split into ' + totalChunks + ' files.', 'success');
+
+    /* Each file is numbered from the first number again; only the file that
+       holds the document's front pages has pages without one. */
+    const wholeOutcome = describeStampOutcome(pageList, settings);
+    showToast('Split into ' + totalChunks + ' files.' +
+      (settings.stampPageNumbers && !wholeOutcome.nothingStamped
+        ? ' Each file is numbered from ' + settings.stampStartNumber + '; pages before page ' +
+          settings.stampFirstPage + ' of the document have no number.'
+        : ''), 'success');
+    if (wholeOutcome.nothingStamped) {
+      setTimeout(function () { showToast(wholeOutcome.text, 'error'); }, 700);
+    }
   } catch (splitError) {
     console.error(splitError);
     closeProgressOverlay();
@@ -7330,7 +7597,8 @@ async function printCurrentDocument() {
   openProgressOverlay('Preparing print preview…');
 
   try {
-    const pdfBytes = await buildPdfBytes(pageList, collectExportSettings());
+    const settings = collectExportSettings();
+    const pdfBytes = await buildPdfBytes(pageList, settings);
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
     const objectUrl = URL.createObjectURL(blob);
 
@@ -7342,7 +7610,11 @@ async function printCurrentDocument() {
       return;
     }
 
-    showToast('Print preview opened in a new tab.');
+    const stampOutcome = describeStampOutcome(pageList, settings);
+    showToast('Print preview opened in a new tab.' + (stampOutcome.nothingStamped ? '' : stampOutcome.text));
+    if (stampOutcome.nothingStamped) {
+      setTimeout(function () { showToast(stampOutcome.text, 'error'); }, 700);
+    }
     setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 60000);
   } catch (printError) {
     console.error(printError);
@@ -14760,6 +15032,26 @@ function wireExportControls() {
 
   getElement('stampToggle').addEventListener('change', function (changeEvent) {
     getElement('stampOptions').style.display = changeEvent.target.checked ? 'flex' : 'none';
+    updateStampSummary();
+  });
+
+  /* Every stamp setting feeds the one sentence underneath them. */
+  ['stampFirstPageInput', 'stampStartInput', 'stampPositionSelect', 'stampSizeInput', 'stampFormatSelect']
+    .forEach(function (elementId) {
+      getElement(elementId).addEventListener('input', updateStampSummary);
+      getElement(elementId).addEventListener('change', updateStampSummary);
+    });
+
+  /* A box left empty, or holding something below its minimum, is put back to
+     what will actually be used the moment it is left — so the box never shows
+     one thing while the export does another. */
+  getElement('stampFirstPageInput').addEventListener('blur', function (blurEvent) {
+    blurEvent.target.value = String(readWholeNumberField('stampFirstPageInput', DEFAULT_STAMP_FIRST_PAGE, 1));
+    updateStampSummary();
+  });
+  getElement('stampStartInput').addEventListener('blur', function (blurEvent) {
+    blurEvent.target.value = String(readWholeNumberField('stampStartInput', DEFAULT_STAMP_FIRST_NUMBER, 0));
+    updateStampSummary();
   });
 }
 
